@@ -583,9 +583,112 @@ For list-page entities with a detail view, **extend the existing `QuickViewConte
 
 ## 11 · Tables & lists
 
+### NEVER bare `<table>` for a list page — always the project's full datagrid
+
+**Hard rule.** Any list page (entities, audit logs, settings rows, anything tabular with > one column) MUST use the project's full-featured server-data-table component, NOT a bare `<table>` / `<Table>` wrapper. The bare table gives you NOTHING — no sort, no filter, no search, no pagination, no saved views, no column show/hide, no row actions menu, no empty/error states, no density toggle. Every list page accumulates those features sooner or later; rebuilding them per page is wasted work and pages drift in subtle UX.
+
+Canonical names across projects (one of these exists; find yours by `grep -rln "ServerDataTable\|DataTable\|EntityTable" src/components/ui/`):
+
+- `ServerDataTable` (basecn projects)
+- `DataTable` (shadcn projects)
+- Project-specific equivalent
+
+**Verify by grepping a sibling list page.** If `/metafields` / `/products` / `/collections` use `ServerDataTable`, the new entity's list page uses it too. Same shape, copy-paste pattern, fill in `columns` + `filterFields` + `sortOptions` + `queryFn`. Pages that don't follow this stick out as "messy" to anyone who knows the codebase.
+
+**Audit failure mode.** If you ship a CRUD page with a hand-rolled `<Table>`/`<table>` + `.map(row => <TR>…</TR>)`, the user notices instantly. The fix is always: rip the table out, drop in `ServerDataTable` with the columns/filters/sort/actions config, keep the create/edit dialog beside it.
+
 ### Library
 
-`@tanstack/react-table` (headless) wrapped into `src/components/ui/data-table.tsx`. Virtual rows via `@tanstack/react-virtual` when row count > a few hundred. DnD via `@dnd-kit/*`.
+`@tanstack/react-table` (headless) wrapped into `src/components/ui/data-table.tsx` (or `server-data-table/`). Virtual rows via `@tanstack/react-virtual` when row count > a few hundred. DnD via `@dnd-kit/*`.
+
+### ServerDataTable canonical shape (verbatim — copy this)
+
+```tsx
+import {
+  type DataTableColumn,
+  defineFilterFields,
+  defineSortOptions,
+  ServerDataTable,
+} from "@/components/ui/server-data-table"
+import { clientConnection } from "@/lib/client-datatable"
+import { pimQuery } from "@/integrations/graphql-codegen/pim-fetch"
+import { Pencil, Trash2, Eye } from "lucide-react"
+import { EntityDocument, type EntityQuery } from "@/generated/graphql/graphql"
+
+type Row = NonNullable<EntityQuery["pimEntities"]>[number]
+type Where = { search?: string; kind?: string[]; status?: "active" | "draft" }
+
+const cols: DataTableColumn<Row>[] = [
+  { id: "code",   header: "Code",   size: 220, meta: { sortFieldId: "code", filterFieldId: "search" },
+    cell: (r) => <span className="font-mono text-[13px] font-medium">{r.code}</span> },
+  { id: "kind",   header: "Kind",   size: 140, meta: { sortFieldId: "kind" },
+    cell: (r) => <KindChip kind={r.kind} /> },
+  { id: "status", header: "Status", size: 100,
+    cell: (r) => <StatusBadge status={r.status} /> },
+]
+
+const filterFields = defineFilterFields<Where>()([
+  { id: "search", type: "text", label: "Search", placeholder: "code…",
+    toWhere: (c) => ({ search: c.value ?? undefined }) },
+  { id: "kind", type: "relation-multi", label: "Kind",
+    loadOptions: (q) => loadDistinct("kind", q),
+    toWhere: (c) => ({ kind: c.value }) },
+  { id: "status", type: "select", label: "Status",
+    options: [{ value: "active", label: "Active" }, { value: "draft", label: "Draft" }],
+    toWhere: (c) => ({ status: c.value as Where["status"] }) },
+])
+
+const sortOptions = defineSortOptions()([
+  { fieldId: "code", label: "Code" },
+  { fieldId: "kind", label: "Kind" },
+])
+
+<ServerDataTable<Row, Where>
+  queryKey="pimEntities"
+  views={{}}
+  columns={cols}
+  filterFields={filterFields}
+  sortOptions={sortOptions}
+  defaultSort={[{ fieldId: "code", direction: "asc" }]}
+  getRowId={(r) => r.id}
+  pageSize={25}
+  rowActions={(row) => [
+    { label: "Edit",   icon: Pencil, onAction: () => setEditing(row) },
+    { label: "Delete", icon: Trash2, destructive: true, onAction: () => setDeleteTarget(row) },
+  ]}
+  emptyMessage="No entities yet"
+  emptyDescription="Click 'New entity' to add the first one."
+  queryFn={async (args) => {
+    const data = await pimQuery<EntityQuery>(String(EntityDocument))
+    return clientConnection(data.pimEntities ?? [], args, {
+      filter: (r, where) => { /* apply where */ return true },
+      sorters: { code: (r) => r.code.toLowerCase() },
+    })
+  }}
+/>
+```
+
+**Pass the codegen-generated `*Document` to `pimQuery` via `String(…)`** — keeps type safety on the result while reusing the project's non-hook fetch path that `ServerDataTable.queryFn` requires.
+
+### Per-row Actions — use `rowActions` prop, NOT a custom column
+
+`ServerDataTable` ships a `rowActions` prop that renders a dropdown with `Edit`, `Delete` (+ quick-view `Eye` when applicable). Pass an array; don't add a custom Actions column that re-implements the same dropdown.
+
+```tsx
+rowActions={(row) => [
+  { label: "Quick view", icon: Eye,    onAction: () => qv.push({ kind, id: row.id }) },
+  { label: "Edit",       icon: Pencil, onAction: () => openEdit(row.id) },
+  { label: "Delete",     icon: Trash2, destructive: true, onAction: () => openDeleteConfirm(row) },
+]}
+```
+
+If you genuinely need inline icon buttons (e.g. starring, archiving — frequent single-click actions), add a custom column ALONGSIDE `rowActions` — don't replace it.
+
+### List rows as `<Link>` + overlay icons (when row has a detail page)
+
+When the entity has a detail page: the row IS a `<Link to="/<entity>/$id">`. Absolute-positioned overlay with hover-revealed `Eye + Pencil` via `group/row` + `group-hover/row:opacity-100`. Do NOT use clickable `<li onClick>` — accessibility (no `<a>`), no middle-click-to-open-tab, no copy-link-address.
+
+When the entity does NOT have a detail page yet: skip the `<Link>`. The `rowActions` dropdown handles Edit/Delete. Add the `<Link>` wrapper later when the detail page ships.
 
 ### Per-row Actions column — MANDATORY
 
@@ -915,6 +1018,8 @@ Edits get clobbered on next regen. Touch the source (route file, GraphQL schema,
 | Keystroke handler without `stopPropagation()` | Both provider AND legacy listener fire | `preventDefault() + stopPropagation()` (§15) |
 | Bind `?` AND `Shift+?` | Same keystroke matches both; race | Pick one; use `F1` / `Cmd+/` for second cheatsheet (§15) |
 | `<input>` directly inside `DropdownMenuContent` | Typeahead intercepts every printable key | Wrap in `div` with `stopPropagation` on keydown (§15) |
+| `<Button>` chrome at default size in shadcn-baseline projects (`h-9` render) | Looks oversized in dense admin UI; ubgo target is `h-8` everywhere except hero CTAs | Map ubgo "default" → `size="sm"` whenever project's button.tsx ships `default: "h-9 …"` (§29.2 — two mapping tables) |
+| Bare `<table>` / `<Table>` + `.map(row => <TR>…</TR>)` on a list page | No sort, no filter, no search, no pagination, no saved views, no column show/hide, no row-action dropdown, no empty/error states, no density toggle — every list page accumulates those eventually; rebuilding per page is wasted work | Use the project's full-featured datagrid (`ServerDataTable` / `DataTable` / equivalent) with `columns` + `filterFields` + `sortOptions` + `rowActions` + `queryFn`. Verify pattern by `grep -rln 'ServerDataTable' src/routes/` (§11) |
 | `useSyncExternalStore` returning a fresh array per call | "Maximum update depth exceeded" | Token-keyed snapshot cache (§8) |
 | Lazy-importing Excalidraw / Monaco / tldraw | SSR hydration crash → blank page | `clientOnly()` boundary (§13) |
 | Editing `src/generated/sdk/` | Clobbered on next `task gqlkit:all` | Change SDL + regen (§3) |
@@ -989,28 +1094,54 @@ Two canonical wrappers — pick one per page and stick to it:
 | `destructive-soft` | `bg-destructive/10 text-destructive` | Tinted delete (less alarming) |
 | `link` | `text-primary underline-offset-4 px-0 h-auto` | Inline anchor styled as link |
 
-Sizes (memorize):
+Sizes — TWO TABLES because shadcn/basecn ship larger defaults than the dense-UI ideal. **Always check your project's `button.tsx`** to know which table applies, then pick the size that lands at the **target height** column.
+
+**Target sizes (the dense-UI ideal):**
 
 ```
-xs       h-6 px-2 text-xs
-sm       h-7 px-2.5 text-[13px]
-default  h-8 px-3 text-[13px]          ★ most common
-lg       h-9 px-3.5 text-sm
-xl       h-10 px-4 text-sm
+xs       h-6  px-2    text-xs                  rare; super-compact toolbars
+small    h-7  px-2.5  text-[13px]              rare; tightest viable
+default  h-8  px-3    text-[13px]   ★ most common in dense admin chrome
+medium   h-9  px-3.5  text-sm                  hero CTAs on landing pages
+large    h-10 px-4    text-sm                  rare; marketing
+icon-sm  size-7 px-0                ★ row-action default
 icon     size-8 px-0
-icon-xs  size-6 px-0
-icon-sm  size-7 px-0                    ★ row-action default
 icon-lg  size-9 px-0
 ```
 
-Rules:
+**Mapping into the actual `Button` you import** — two flavors:
 
-- Icon-text gap: **always `gap-1.5`**.
+| Project ships… | …then ubgo "default" maps to | Verify by |
+|---|---|---|
+| `default: "h-8 px-3"` (compact) | `size="default"` | `grep "default:" components/ui/button.tsx` shows `h-8` |
+| `default: "h-9 px-4"` (shadcn/basecn baseline) | `size="sm"` (because the project's `sm` is `h-8`) | `grep "default:" components/ui/button.tsx` shows `h-9` |
+
+**Rule of thumb that always works:** look at the rendered `<button>` height in DevTools. If it's anything other than `32px` (= `h-8`) for chrome buttons (top-of-page CTAs, table-toolbar buttons, form footer buttons), it's wrong — fix the `size=` prop until it lands at 32px.
+
+**Icon-button mapping** is the same pattern:
+
+| Project ships… | …then ubgo "icon-sm" maps to | Target |
+|---|---|---|
+| `icon-sm: "size-7"` (dense) | `size="icon-sm"` | size-7 (28px) |
+| `icon-sm: "size-8"` (shadcn baseline) | `size="icon-sm"` (project's icon-sm = size-8 = the row-action target in that project) | size-8 (32px) |
+| no `icon-sm` defined | add it; or use `size="icon"` if that lands at 28–32px | — |
+
+**Rules (regardless of which mapping applies):**
+
+- **Icon-text gap: always `gap-1.5`.**
 - SVG inside button defaults to `size-3.5` unless overridden.
 - Active press: `active:translate-y-px` (1px down — already baked into base).
 - Disabled: `disabled:opacity-50 disabled:pointer-events-none` (baked).
 - Loading: `disabled={isSubmitting}` + change label to `"Creating…"` (ellipsis char `…`, not three dots). Never spin a spinner without also disabling.
-- In dialogs: ALWAYS `size="sm"` on footer buttons. Never `default` in a footer — looks oversized.
+- In dialogs: ALWAYS use the size that lands at `h-8` on footer buttons. In shadcn-baseline projects that's `size="sm"`. In compact-default projects that's `size="default"`. Never let a footer button render at `h-9`+ — looks oversized.
+- Top-of-page CTAs (the "New X" button in PageHeader's right slot) follow the same rule: render at `h-8`. Same size mapping applies.
+
+**Mismatch audit checklist** (run when you join a new project):
+
+1. `grep -E "default:|sm:|icon-sm:" src/components/ui/button.tsx` to see what the project's variants emit
+2. Compare against the target column above
+3. If shipped `default = h-9`, add a one-line note to `frontend-project.md` overlay: *"In this project, ubgo's prescribed `size='default'` maps to `size='sm'`. Use `size='sm'` for all chrome buttons; reserve `size='default'` for hero CTAs."*
+4. If shipped `default = h-8`, no overlay needed — sizes line up.
 
 ### 29.3 · Inputs
 
