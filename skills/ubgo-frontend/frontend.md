@@ -1020,6 +1020,7 @@ Edits get clobbered on next regen. Touch the source (route file, GraphQL schema,
 | `<input>` directly inside `DropdownMenuContent` | Typeahead intercepts every printable key | Wrap in `div` with `stopPropagation` on keydown (§15) |
 | `<Button>` chrome at default size in shadcn-baseline projects (`h-9` render) | Looks oversized in dense admin UI; ubgo target is `h-8` everywhere except hero CTAs | Map ubgo "default" → `size="sm"` whenever project's button.tsx ships `default: "h-9 …"` (§29.2 — two mapping tables) |
 | Bare `<table>` / `<Table>` + `.map(row => <TR>…</TR>)` on a list page | No sort, no filter, no search, no pagination, no saved views, no column show/hide, no row-action dropdown, no empty/error states, no density toggle — every list page accumulates those eventually; rebuilding per page is wasted work | Use the project's full-featured datagrid (`ServerDataTable` / `DataTable` / equivalent) with `columns` + `filterFields` + `sortOptions` + `rowActions` + `queryFn`. Verify pattern by `grep -rln 'ServerDataTable' src/routes/` (§11) |
+| `max-w-[1100px] mx-auto` wrapper on an admin list / table / CRUD / dashboard page | Reads as a bug — sibling pages in the same sidebar shell render at different widths; tables get squeezed when they should stretch | Default `<div className="px-6 py-6">` for every list / table / CRUD / dashboard route. `max-w-[1100px]` is reserved for EntityShell detail pages only. Verify by `grep -nE 'max-w-\[' src/routes/<page>.tsx` returning 0 hits (§29.1) |
 | `useSyncExternalStore` returning a fresh array per call | "Maximum update depth exceeded" | Token-keyed snapshot cache (§8) |
 | Lazy-importing Excalidraw / Monaco / tldraw | SSR hydration crash → blank page | `clientOnly()` boundary (§13) |
 | Editing `src/generated/sdk/` | Clobbered on next `task gqlkit:all` | Change SDL + regen (§3) |
@@ -1069,17 +1070,28 @@ This is the visual rulebook — exact classNames, dimensions, color maps. When i
 
 ### 29.1 · Page wrapper
 
-Two canonical wrappers — pick one per page and stick to it:
+**Default: full-width with subtle padding.** Admin / list / table / dashboard pages all use the same wrapper as every other route in the project — `<div className="px-6 py-6">` — no `max-width`, no `mx-auto`. The content fills the available column inside the sidebar shell, density tables get the room they need, and visual consistency holds across `/products`, `/collections`, `/metafields`, `/attributes`, every new CRUD page.
 
 ```tsx
-// Constrained content (lists, detail pages, settings)
-<div className="max-w-[1100px] mx-auto px-3 sm:px-6 py-3 sm:py-5">...</div>
-
-// Full-width (boards, multi-pane, dense tables that need the room)
-<div className="px-6 pt-6">...</div>
+// Default — what every list / table / CRUD / dashboard route uses
+<div className="px-6 py-6">
+  <PageHeader ... />
+  <ServerDataTable<Row, Where> ... />
+</div>
 ```
 
-`max-w-[1100px]` is the reading-width standard across EntityShell, knowledge lists, settings. No other max widths without reason.
+**Constrained reading-width** (`max-w-[1100px] mx-auto px-3 sm:px-6 py-3 sm:py-5`) is reserved EXCLUSIVELY for EntityShell detail pages — the editorial-style single-entity detail view where wide content harms scannability. Long-form prose + form-heavy detail panes only. NEVER for admin lists, datatables, or settings pages.
+
+**Discovery rule when adding a new page:** before choosing a wrapper, grep a sibling route. If `/products` / `/metafields` / `/collections` use `<div className="px-6 py-6">`, your new admin page uses it too. Mismatched widths within the same admin shell read as a bug — the sidebar nav implies "these pages are siblings," and siblings have the same content frame.
+
+**Verify by:** `grep -nE 'max-w-\[' src/routes/<your-new-page>.tsx` — should return ZERO hits unless the page is an EntityShell detail.
+
+```tsx
+// EntityShell detail (rare — single-entity editorial-style view)
+<div className="max-w-[1100px] mx-auto px-3 sm:px-6 py-3 sm:py-5">...</div>
+```
+
+Don't author a third wrapper variant. Two shapes, clear trigger for each.
 
 ### 29.2 · Button system
 
