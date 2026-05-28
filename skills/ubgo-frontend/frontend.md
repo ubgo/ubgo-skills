@@ -1602,9 +1602,99 @@ Before pushing visual changes, walk these five gates:
 4. **Hairline rules.** `border-border/60` or `.hairline`. Not `border-2`.
 5. **One conceptual direction.** Editorial / brutalist / terminal / dense-data — commit to one. "Modern SaaS" is not a direction; it's the absence of one.
 
+## 30 · Cross-component messaging — typed event bus, NOT window events
+
+> **Hard rule:** every cross-component signal (data invalidation, "drawer closed", "focus next row", anything one component fires for another) goes through the project's **typed app event bus**. Never `window.dispatchEvent(new CustomEvent("aicoder:foo"))` + `window.addEventListener("aicoder:foo", …)`. Stringly-typed window events lose every guarantee TypeScript gave you: rename the event, no error; misspell the listener, no error; payload shape drifts, no error.
+
+This bit on a real bug: a QuickView drawer was emitting `"aicoder:task-mutated"` via window events and list pages were subscribed via `window.addEventListener`. Worked fine until somebody renamed the event — no compile error, just silent stale-list behaviour again.
+
+### The pattern (use everywhere)
+
+1. **Single source of truth for event vocabulary** — `keyboard/events.ts` (or equivalent) holds an `AppEvents` type:
+   ```ts
+   export type AppEvents = {
+       "data:task:mutated":     { id?: string }
+       "data:plan:mutated":     { id?: string }
+       // …one row per event, payload type or `void`
+   }
+   ```
+2. **One bus instance** typed against that map:
+   ```ts
+   // keyboard/bus.ts
+   export const appBus = createBus<AppEvents>()
+   ```
+3. **Emitter** — name + payload checked against `AppEvents`:
+   ```ts
+   appBus.emit("data:task:mutated", { id: taskId })
+   ```
+4. **Subscriber** — same:
+   ```ts
+   useEvent(appBus, "data:task:mutated", ({ id }) => void refresh())
+   ```
+5. **Discriminated-union helper types** for generated/related names so a renamed event surfaces at every emit AND every listen site:
+   ```ts
+   export type DataEntityKind = "task" | "plan" | "spec" | …
+   export type DataMutatedEvent = `data:${DataEntityKind}:mutated`
+   ```
+6. **`satisfies` to bind external maps** to the union without losing literal types:
+   ```ts
+   const MUTATION_TO_EVENT = {
+       createTask: "data:task:mutated",
+       updateTask: "data:task:mutated",
+       …
+   } as const satisfies Record<string, DataMutatedEvent>
+   ```
+   Any value not in `DataMutatedEvent` → compile error. Rename `data:task:mutated` → break point shows up here, at every emit, and at every `useEvent` call. That's the point.
+
+### When to fire from low-level infra (e.g. the HTTP/GraphQL client)
+
+If a mutation should always invalidate a view (most do), fire from the **shared API client** — not at every call site:
+
+```ts
+// lib/gql-clients.ts
+const broadcastingFetch: typeof fetch = async (input, init) => {
+    const res = await authFetch(input, init)
+    const body = init?.body
+    if (!res.ok || typeof body !== "string") return res
+    const matched = new Set<DataMutatedEvent>()
+    for (const [name, event] of Object.entries(MUTATION_TO_EVENT)) {
+        if (body.includes(name)) matched.add(event as DataMutatedEvent)
+    }
+    if (matched.size > 0) {
+        queueMicrotask(() => {
+            for (const e of matched) appBus.emit(e, {})
+        })
+    }
+    return res
+}
+```
+
+Two things to note:
+- **`queueMicrotask`** so the awaiting caller settles its own state before listeners react (otherwise a refresh fires mid-await and reads stale rows).
+- **`Set<DataMutatedEvent>`** deduplicates when a single request body contains multiple mutation operations.
+
+### Anti-patterns (don't)
+
+| Bad | Why | Use instead |
+|---|---|---|
+| `window.dispatchEvent(new CustomEvent("foo"))` + `window.addEventListener("foo", …)` | Stringly-typed, silent rename/drift, no payload type, hard to find all listeners | `appBus.emit("foo", payload)` + `useEvent(appBus, "foo", h)` |
+| `eventEmitter.emit("task:mutated", anything)` w/o typed map | Same problem one layer deeper | Typed bus generic over `AppEvents` |
+| `const EVENT_TASK = "aicoder:task-mutated"` exported from somewhere | Hides the typo at compile time, surfaces at runtime as "nothing happens" | Add to `AppEvents`, let union literal types catch typos |
+| `postMessage`, `BroadcastChannel`, custom DOM events | Right tool only when you genuinely cross window/iframe/worker boundaries. In-app = bus. | Same: typed bus |
+
+### Subscriber sanity rules
+
+- Subscribe in component body via the hook (`useEvent`). Manual `bus.on(…)` + `useEffect` cleanup works but is error-prone. The hook handles unsubscribe on unmount.
+- If you find yourself adding a new event name in a string literal somewhere, you skipped step 1 — go add it to `AppEvents` first, then the rest of the code becomes safe to write.
+- Adding a row to `AppEvents` for an event nobody subscribes to is FINE. Cheap insurance. Removing a row when there's still a subscriber is a compile error — that's the contract.
+
+### One-liner for code review
+
+> "If grep finds `addEventListener("aicoder:` or `dispatchEvent(new CustomEvent("aicoder:`, the change isn't ready."
+
 ---
 
-## 30 · When in doubt
+## 31 · When in doubt
 
 - ANSWER first if the user described a situation rather than gave an imperative. Wait for go-ahead before editing.
 - Never `git commit` / `git push` without asking.
