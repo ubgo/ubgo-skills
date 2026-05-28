@@ -36,32 +36,32 @@ The three roles are independent — loading the `train` skill doesn't auto-train
 <tr><th width="200">Skill</th><th>What it does</th></tr>
 
 <tr>
-<td><a href="skills/ubgo-golang/"><code>ubgo-golang</code></a><br><sub>rules</sub></td>
+<td><a href="skills/ubgo-golang/"><code>ubgo-golang</code></a></td>
 <td>Universal Go backend rules — stack choices, the 3 commandments (no bare strings, no hardcoded enums, no DB-level business validation), entpoly polymorphism, reference tables, DB-as-dumb-storage, logging (<code>lace/gozap</code>), tracing (<code>lace/gotel</code>), <code>valgo</code> validation, concurrency/defer/time/HTTP/context.Value/constructors traps, migration discipline, anti-pattern catalog, pre-PR checklist. Read before any Go change.</td>
 </tr>
 
 <tr>
-<td><a href="skills/ubgo-golang-train/"><code>ubgo-golang-train</code></a><br><sub>train</sub></td>
+<td><a href="skills/ubgo-golang-train/"><code>ubgo-golang-train</code></a></td>
 <td>Training loop for <code>ubgo-golang</code>. Captures universal Go learnings from real sessions back into the canonical <code>golang.md</code>. Decision tree for universal vs project vs noise, section-targeting table, voice rules, conflict reconciliation, path-discovery sync ritual. The skill gets smarter every session it's loaded.</td>
 </tr>
 
 <tr>
-<td><a href="skills/ubgo-golang-learn/"><code>ubgo-golang-learn</code></a><br><sub>learn</sub></td>
+<td><a href="skills/ubgo-golang-learn/"><code>ubgo-golang-learn</code></a></td>
 <td>Bootstrap a Go repo's project overlay (<code>golang-project.md</code>) that extends the universal rules with this repo's named constants, module layout, codegen task names, captured-in-blood gotchas, and workflow. Multi-agent targets (Claude / Cursor / Windsurf / Cline / Codex / Copilot / Gemini). Re-runnable.</td>
 </tr>
 
 <tr>
-<td><a href="skills/ubgo-frontend/"><code>ubgo-frontend</code></a><br><sub>rules</sub></td>
+<td><a href="skills/ubgo-frontend/"><code>ubgo-frontend</code></a></td>
 <td>Universal frontend rules — TanStack Start + Base UI (basecn) + Tailwind v4 + gqlkit SDK stack, the 5 commandments (no inline GraphQL, no <code>useEffect</code>-for-fetch, no native dialogs, no raw <code>&lt;select&gt;</code>, no Radix), design tokens (Fraunces + Geist + compact type scale), forms (TanStack Form + Zod), data fetching (TanStack Query), routing, dialogs/sheets, SSR safety (Nitro <code>localStorage</code> trap, barrel-cycle trap), keyboard dispatcher, hard-won traps, AND a long §29 <em>"Concrete UI patterns"</em> section with verbatim classNames for every primitive (buttons with two-table sizing mapping for compact-default vs shadcn-baseline projects, inputs, forms, ServerDataTable, EntityShell, QuickView, chips/status pills, color + opacity ramps). Read before any <code>.tsx</code> / <code>.css</code> change.</td>
 </tr>
 
 <tr>
-<td><a href="skills/ubgo-frontend-train/"><code>ubgo-frontend-train</code></a><br><sub>train</sub></td>
+<td><a href="skills/ubgo-frontend-train/"><code>ubgo-frontend-train</code></a></td>
 <td>Training loop for <code>ubgo-frontend</code>. Same shape as <code>ubgo-golang-train</code> but targets <code>frontend.md</code>. Captures universal UI/UX learnings (datagrid-not-bare-table, button-size mapping, dialog-width gotcha, etc.) back into the canonical body. Includes worked examples and a quality bar with the two-occurrence rule for §29 verbatim patterns.</td>
 </tr>
 
 <tr>
-<td><a href="skills/ubgo-wails-desktop/"><code>ubgo-wails-desktop</code></a><br><sub>rules</sub></td>
+<td><a href="skills/ubgo-wails-desktop/"><code>ubgo-wails-desktop</code></a></td>
 <td>Package an existing Go (Gin + gqlgen + oRPC + tRPC) backend and a Web SPA frontend (TanStack Start / Vite / Next-static / SvelteKit-static) into a single native macOS desktop binary using Wails — with ZERO TCP listeners at runtime. API calls ride the Wails IPC bridge into the existing Gin engine in-memory via <code>httptest.NewRecorder</code>. No backend or frontend rewrites; only a <code>fetch</code>-shaped transport swap via a <code>bridgeFetch</code> shim. Captures every gotcha from a real integration (Wails CLI vs Go workspace, macOS framework linker flags, TanStack Start <code>_shell.html</code> rename, <code>config.Get</code> CWD trap, DevTools build tags, base64 IPC overhead, vendor regeneration, Wails 2.8.1 <code>mac.Options</code> surface).</td>
 </tr>
 </table>
