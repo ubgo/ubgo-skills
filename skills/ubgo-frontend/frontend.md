@@ -1694,6 +1694,156 @@ Two things to note:
 
 ---
 
+## 30.5 · Other stringly-typed traps the bus rule doesn't catch
+
+Killing window events fixes one class of drift. A type-safety audit usually finds four more in the same codebase. Treat each as a "no bare strings here" zone with the same union-type + lookup-table pattern.
+
+### 30.5a · Status string magic values
+
+Backend often stores `status` as a free-form `String` even though only ~7 values are ever used. Frontend code ends up with:
+
+```ts
+// scattered across N files
+status: "todo"
+status === "in_progress" ? … : status === "done" ? … : …
+const STATUSES = ["todo", "in_progress", "blocked", "done", "cancelled"]
+```
+
+Every one of those is silently brittle: typo `"in-progress"` vs `"in_progress"`, server adds `"awaiting_review"`, half the files miss the update. Fix:
+
+```ts
+// src/lib/task-status.ts (single source of truth)
+export type TaskStatus =
+    | "todo" | "in_progress" | "awaiting_review" | "rework"
+    | "blocked" | "done" | "cancelled"
+
+export const TASK_STATUSES: readonly TaskStatus[] = [
+    "todo", "in_progress", "awaiting_review", "rework",
+    "blocked", "done", "cancelled",
+] as const
+
+export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+    todo: "To do",
+    in_progress: "In progress",
+    /* … */
+}
+
+// Narrowing helper for the seam where API returns `string`.
+export function asTaskStatus(s: string, fallback: TaskStatus = "todo"): TaskStatus {
+    return (TASK_STATUSES as readonly string[]).includes(s) ? (s as TaskStatus) : fallback
+}
+```
+
+Then every `Record<TaskStatus, X>` for styles / icons / sort weights forces you to handle every variant — adding a new status surfaces as a compile error at every map.
+
+### 30.5b · Inline Tailwind class ternaries for semantic state
+
+```ts
+// BAD — every design tweak grep+sed across N files
+className={
+    spec.status === "active"
+        ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+        : spec.status === "done"
+            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+            : "bg-muted text-muted-foreground"
+}
+```
+
+```ts
+// GOOD — one map, exhaustive over the enum, one edit retunes the app
+const SPEC_STATUS_STYLES: Record<SpecStatus, string> = {
+    DRAFT:    "bg-muted text-muted-foreground",
+    ACTIVE:   "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+    DONE:     "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+    ARCHIVED: "bg-muted/50 text-muted-foreground line-through",
+}
+className={SPEC_STATUS_STYLES[spec.status]}
+```
+
+Rule: any time a class string depends on an enum/union value, the choice goes in a `Record<UnionType, string>` map. Inline ternaries lie about exhaustiveness.
+
+### 30.5c · Magic numbers for timeouts / debounces / limits
+
+```ts
+// scattered
+setTimeout(() => setCopied(false), 1500)  // copy toast
+window.setTimeout(flush, 350)              // editor flush
+useDebouncedValue(search, 250)             // table search
+debounce(fn, 300)                          // generic search
+```
+
+Six files all picked `1500` for the copy toast — a UX change requires editing six files. Fix:
+
+```ts
+// src/lib/timings.ts
+export const COPY_TOAST_DURATION       = 1500
+export const SEARCH_DEBOUNCE_MS        = 300
+export const SEARCH_DEBOUNCE_TIGHT_MS  = 250
+export const PICKER_DEBOUNCE_MS        = 200
+export const EDITOR_FLUSH_DEBOUNCE_MS  = 350
+export const POST_MOUNT_FOCUS_DELAY    = 50
+export const OBJECT_URL_REVOKE_DELAY   = 1000
+```
+
+Pick the named bucket that matches your intent. Document NEW buckets with a one-line comment so the next dev knows when to reach for them vs a one-off number. One-offs are fine — the rule is "don't duplicate a number across files".
+
+### 30.5d · localStorage / sessionStorage keys
+
+A typo in a storage key is silent — `localStorage.getItem("usr.theme")` vs `setItem("user.theme", …)` both succeed but read/write different slots. Centralise:
+
+```ts
+// src/lib/storage-keys.ts
+export const STORAGE_KEYS = {
+    AUTH_ACCESS:      "authmgr.access",
+    AUTH_REFRESH:     "authmgr.refresh",
+    ACTIVE_WORKSPACE: "authmgr.active_workspace",
+    DRAWER_WIDTH:     "ui.drawer-width",
+    /* … */
+} as const
+
+// Read/write only via the constants:
+localStorage.setItem(STORAGE_KEYS.AUTH_ACCESS, token)
+```
+
+If a key is used in only one file, leaving it as a `const KEY = "…"` at module top is acceptable. The rule kicks in the moment two files touch the same slot.
+
+### 30.5e · Route paths in non-TanStack call sites
+
+TanStack Router types `<Link to>` and `navigate({to})` against the generated route tree. But code that builds route strings manually (`replace("$projectId", id)`, keybind handlers that store the URL template) loses that typing. Define a `RouteKey` union of the route templates you broadcast through that layer:
+
+```ts
+// Already done in NavigationListener but worth tightening:
+type RouteKey =
+    | "/" | "/login" | "/projects"
+    | "/w/$workspaceId/inbox"
+    | "/prj/$projectId/board"
+    | /* … */
+
+const keybinds: { event: "nav"; payload: { to: RouteKey } }[] = [
+    { event: "nav", payload: { to: "/prj/$projectId/board" } },
+    /* … */
+]
+```
+
+### Code-review checklist for stringly-typed leaks
+
+When reviewing any non-trivial PR, grep for these patterns:
+
+```
+addEventListener("aicoder:    →  use appBus (rule 30)
+dispatchEvent(new CustomEvent →  use appBus (rule 30)
+status === "                  →  use Record<Status, …> + exhaustive union
+status: "                     →  use TaskStatus union, not bare string
+const STATUSES = [            →  derive from TASK_STATUSES const
+setTimeout(.+, [0-9]+)        →  use src/lib/timings.ts constant
+localStorage.(get|set)Item\(" →  use STORAGE_KEYS constant
+className=\{[a-z]+\s*===      →  inline ternary; extract to Record<…, string>
+```
+
+A single offender slipping through isn't end-of-world. The pattern's value is that NEW code learns from the surrounding file — if every file uses the typed constant, the next dev reaches for it too.
+
+---
+
 ## 31 · When in doubt
 
 - ANSWER first if the user described a situation rather than gave an imperative. Wait for go-ahead before editing.
