@@ -1168,6 +1168,137 @@ Before saying a Go change is "done":
 
 ---
 
+## 33 · Repo layout, Taskfile, codegen chain
+
+Patterns we apply to every greenfield Go service. Borrowed-and-canonicalised from real projects (sync_go, lore, etc.).
+
+### 33.1 · Module layout — `go.work` monorepo
+
+One repo, multiple modules glued via `go.work`. Typical shape:
+
+```
+<repo>/
+├── go.work               # workspace pointer file
+├── go.work.sum           # COMMITTED
+├── Taskfile.yml          # only entry point for reusable commands
+├── apidash/              # gqlgen GraphQL server (resolvers, generated/, etc.)
+├── dbent/                # ent schema + entgql + Atlas migrations
+├── core/                 # domain primitives (no app glue)
+├── config/               # pkl config + generated Go bindings
+├── lace/                 # shared infra wrappers (pgx, NATS, sentry, otel, gozap)
+├── saas/
+│   ├── cmd/api/          # server entrypoint (Gin + gqlgen)
+│   ├── cmd/cli/          # operator CLI
+│   └── cmd/cron/         # scheduled-job entrypoint
+├── scripts/              # one-off Go scripts (not part of the build)
+├── examples/             # runnable demos for codegen-driven helpers (see §16)
+└── vendor/               # GITIGNORED — see 33.4
+```
+
+Rules:
+- New domain → new module under the repo (not a subpackage of an existing module). Modules are the unit of dependency boundary.
+- `cmd/<binary>` lives inside the `saas` (or equivalent) module that owns the deployable; never as a top-level dir.
+- `lace/*` is the dumping ground for thin wrappers over external libs (gozap over zap, gotel over otel, etc.) — keeps the rest of the codebase importing one project-owned wrapper instead of N versions of the upstream API.
+
+### 33.2 · Taskfile is the only runner
+
+Reach for **[Taskfile](https://taskfile.dev/)** (`Taskfile.yml`, `version: '3'`) for every reusable command. No npm scripts, no Makefile, no shell aliases the team has to remember. Even for Go-only projects.
+
+- Each task needs a `desc:` so `task --list` is self-documenting.
+- Per-domain task namespacing via `:` (e.g. `dbent:g`, `dbent:migrate`, `gql`, `lint`).
+- Top-level commands that wrap multiple subtasks: `task upgrade` should run dep bumps + re-vendor + codegen + migrate.
+- A `task setup` (or `setup:*` family) covers first-clone bootstrap so a new dev runs ONE command.
+- If you find yourself typing the same `go run …` / `go test …` / `go build …` twice — that's the moment it becomes a task.
+
+Common canonical tasks every Go service should expose:
+
+| Task | What |
+|---|---|
+| `task dev` | run the API on a free port |
+| `task lint` | `gofmt -s -d` + `go vet` (+ project linters) |
+| `task test` | unit tests with `-race` |
+| `task dbent:g` | ent regeneration |
+| `task dbent:migrate` | apply schema to dev DB |
+| `task gql` | gqlgen regeneration |
+| `task workvendor` | `go work vendor` regenerate |
+| `task upgrade` | bump module deps + re-vendor + codegen + migrate |
+| `task setup` / `task setup:*` | one-shot first-time bootstrap |
+
+### 33.3 · Codegen chain — ent → gqlgen → SDK
+
+The chain we use for GraphQL APIs, in order:
+
+```
+ent schema (Go)                      dbent/schema/*.go
+    ↓ entgql
+SDL (.graphql)                       apidash/internal/graph/schemas/*.graphql
+    ↓ gqlgen
+typed resolvers + models             apidash/internal/graph/{generated,resolver}
+    ↓ gqlkit (introspection → TS)
+frontend SDK                         <frontend-repo>/src/generated/sdk
+```
+
+Rules:
+- **Every stage runs through a task** (`task dbent:g`, `task gql`, frontend's own `task generate`). Never invoke the underlying generator directly — the task encodes flags / env / cwd / cleanup that hand-invoking will forget.
+- **The earliest stage is the source of truth.** Hand-editing generated SDL or gqlgen output is forbidden; change the ent schema, re-run the chain.
+- **Generated files are committed.** Reviewers need the diff visible; CI verifies `task <generate>; git diff --exit-code` is clean.
+- **Recovery from a partial run** — see project-overlay for the exact path (e.g. `git checkout -- apidash/internal/graph/{generated,resolver}` and retry). Document the recipe in the project overlay, not here.
+
+### 33.4 · `vendor/` is gitignored, regenerated on demand
+
+- `go.mod` + `go.sum` (per-module) + `go.work` + `go.work.sum` (workspace) are the **committed source of truth**.
+- `vendor/` is regenerated via `task workvendor` (`go work vendor`) before any operation that requires it (vendored builds, offline CI, IDE go-to-definition into deps).
+- Do NOT commit `vendor/`. Every dependency upgrade would inflate the diff with thousands of lines of generated code, and the `go.mod` change already records the intent.
+- A fresh clone has no `vendor/`; `task setup` (or `task workvendor`) makes it appear.
+
+### 33.5 · Config: PKL schema + sample-only commit policy
+
+For projects using PKL (`config/pkl/`):
+
+- The **schema** files in `config/pkl/schema/` are committed.
+- The **sample** environment in `config/pkl/env/sample/app.pkl` is committed (template).
+- The **real** environments in `config/pkl/env/{default,prod}/app.pkl` are **gitignored**.
+- Schema refactors update schema + sample but leave local `default`/`prod` stale → `config.Get()` panics at startup. The fix is updating your local file to match `schema/` + `sample/`. The CI build never trips this because CI uses the sample.
+- A `task config:gen` (or similar) regenerates Go bindings from the schema; that output IS committed.
+
+### 33.6 · Portless dev — fixed `.localhost` domains, dynamic ports
+
+Local dev should use **fixed hostnames** (`https://sync-api.localhost`, `https://sync.localhost`) routed via a local CA + reverse proxy, NOT memorised port numbers.
+
+- `task portless:trust` (once per machine) installs the local CA.
+- `task dev:portless` runs the server behind the proxy — port is dynamic (`PORT` env injected by Taskfile per run), code reads it via `read?("env:PORT") ?? "<fallback>"`.
+- **Never hardcode a dev port.** Port collisions across services become a per-machine problem; the host stays stable.
+- Frontend / backend are routed through the same proxy so cookie domain math just works (both at `*.localhost`).
+
+The skill doesn't pick a specific proxy — projects use whichever tool fits (Caddy, mkcert + nginx, a project-specific helper). Documented at the project overlay.
+
+### 33.7 · Hand-maintained `CLAUDE.md` with one sentinel block
+
+The pattern most of our projects use:
+
+- `CLAUDE.md` at repo root is **hand-maintained**.
+- ONE auto-managed sentinel block at the top of the file (e.g. `<!-- aicoder:pointer:start -->` … `<!-- aicoder:pointer:end -->`, or `<!-- lore:pointer:start -->` … `<!-- lore:pointer:end -->`) that the knowledge-base CLI re-stitches on every render. EVERYTHING else in the file is hand content and MUST be preserved across renders.
+- If the project uses two rule files (canonical + project overlay), reference both from `CLAUDE.md` and explain the precedence in one sentence ("project overlay overrides canonical on conflict").
+- Don't let auto-render write the full knowledge body into `CLAUDE.md` — that's what the pointed-to file is for. Keep `CLAUDE.md` lean (intent + load instructions); put the rules in the pointed file.
+
+### 33.8 · Adjacent-repo symlink for one-tree dev
+
+When a backend repo + a frontend repo are developed in lockstep (especially with shared codegen output), use a **gitignored symlink** from the backend to its sibling frontend:
+
+```
+sync_go/
+├── web/       → ../sync_tanstack    # symlink, gitignored
+└── …
+```
+
+- `task setup:web` creates the link idempotently.
+- `task setup:web:unlink` removes the link (without touching the frontend repo).
+- A fresh clone has no `web/` — calling `task setup:web` is part of the first-run bootstrap.
+
+Benefit: codegen relative paths (`../web/src/generated/sdk`) work from one terminal. No multi-repo cwd dance.
+
+---
+
 ## 32 · When in doubt
 
 - ANSWER first if the user described a situation rather than gave an imperative. Wait for go-ahead before editing.
