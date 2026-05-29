@@ -1155,6 +1155,36 @@ icon-lg  size-9 px-0
 3. If shipped `default = h-9`, add a one-line note to `frontend-project.md` overlay: *"In this project, ubgo's prescribed `size='default'` maps to `size='sm'`. Use `size='sm'` for all chrome buttons; reserve `size='default'` for hero CTAs."*
 4. If shipped `default = h-8`, no overlay needed — sizes line up.
 
+**Stronger fix — promote compact to default at the component layer.** "Remember `size='sm'` everywhere" is the exact rule that ships oversized buttons on every page in a busy session. The bulletproof fix is to edit the project's `src/components/ui/button.tsx` ONCE so the default IS compact, and only the rare hero CTA needs an explicit size:
+
+```ts
+// src/components/ui/button.tsx — promote h-8 to default
+size: {
+  default: "h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5",   // ★ compact
+  sm:      "h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5",   // alias
+  md:      "h-9 px-4 py-2 has-[>svg]:px-3",                   // old shadcn default
+  lg:      "h-10 rounded-md px-6 has-[>svg]:px-4",            // marketing / forms
+  icon:    "size-8",
+  "icon-sm": "size-7",
+  "icon-md": "size-9",
+  "icon-lg": "size-10",
+},
+```
+
+Now every `<Button>` that omits `size=` lands at `h-8` for free. The two cases that DO need a size:
+
+- **Full-width form submits** (login, register, set-password, accept-invite). These are page-anchoring CTAs in narrow centred cards — `h-8` looks miniature. Use `size="md"`.
+- **Marketing hero CTAs** on a landing page — `size="lg"`.
+
+This is the cheapest possible fix because:
+
+1. You stop having to remember the per-project mapping table.
+2. Existing call sites that already say `size="sm"` keep working unchanged (the alias).
+3. Any imported component code from a shadcn-baseline starter renders compact automatically — no audit needed.
+4. The overlay note about "this project ships h-9 default" disappears.
+
+The trade-off: any future `npx shadcn add button` would re-introduce `h-9` as default, so the project overlay should list this file as **hand-edited — do not regenerate**.
+
 ### 29.3 · Inputs
 
 ```
