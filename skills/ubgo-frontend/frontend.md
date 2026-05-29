@@ -737,6 +737,50 @@ The row IS a `<Link to="/prj/$projectId/<short>/$<id>">`. Absolute-positioned ov
 
 Bug class: page wraps `PageHeader` directly inside `flex h-full flex-col` with no inner padding → title + actions stick to viewport edges.
 
+### PageHeader is owned by the LEAF page, not the layout
+
+The layout's job is the shell + the content gutter. The PageHeader (icon / title / subtitle / primary CTA / secondary actions) is OWNED BY EACH LEAF PAGE — so each page picks its own icon and action set without the layout having to know about it. This mirrors the Shopify admin pattern: `/collections` has "Add collection" + "More actions", `/apps` has "Visit App Store", `/settings/api-keys` has "New key" — every page composes its own header.
+
+Anti-pattern: a TITLES map in the layout that switches on route to inject a header. Brittle, duplicates routing knowledge, and stops you from putting page-specific CTAs in the header without leaking through the layout.
+
+Canonical PageHeader shape — five slots, one separator:
+
+```tsx
+<PageHeader
+  icon={<KeyRound />}              // lucide; rendered at size-[18px]
+  title="API keys"
+  subtitle="Machine credentials for plugins, scripts, and webhooks"
+  primaryAction={<Button>New key</Button>}
+  secondaryActions={<Button variant="outline">Import</Button>}
+/>
+```
+
+Implementation (verbatim — copy this):
+
+```tsx
+export function PageHeader({ icon, title, subtitle, primaryAction, secondaryActions, right }: {
+  icon?: ReactNode; title: string; subtitle?: string
+  primaryAction?: ReactNode; secondaryActions?: ReactNode; right?: ReactNode
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-border pb-3 mb-4">
+      <div className="flex items-center gap-2 min-w-0">
+        {icon ? <span className="text-foreground/80 [&_svg]:size-[18px]">{icon}</span> : null}
+        <div className="min-w-0">
+          <h1 className="text-[18px] font-semibold tracking-tight leading-tight truncate">{title}</h1>
+          {subtitle ? <p className="text-[12px] text-muted-foreground mt-0.5">{subtitle}</p> : null}
+        </div>
+      </div>
+      {primaryAction || secondaryActions || right ? (
+        <div className="flex items-center gap-2 shrink-0">
+          {secondaryActions}{primaryAction}{right}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+```
+
 ### Container max-widths
 
 Constrained reading pages: `max-w-[1200px] mx-auto`. Boards / multi-pane / dense data tables: full-width. No magic widths; pick one of the two.
@@ -1007,6 +1051,17 @@ Edits get clobbered on next regen. Touch the source (route file, GraphQL schema,
 | `<li onClick>` for list rows | No `<a>`, no middle-click, no copy-link | `<Link>` row + overlay `Eye/Pencil` (§11) |
 | Click-on-row WITHOUT trailing Actions column | Discoverability bug — users don't know what's clickable | Mandatory per-row `Eye + Pencil` (§11) |
 | `<PageHeader>` without outer padding wrapper | Title sticks to viewport edge | `<div className="px-6 pt-6"><PageHeader/></div>` (§12) |
+| Layout auto-injects `<PageHeader>` via a TITLES route map | Brittle; blocks per-page CTAs | Each leaf page owns its PageHeader with `icon/title/subtitle/primaryAction/secondaryActions` slots (§12) |
+| Interactive `<div>` / `<button>` without `cursor-pointer` | Half the chrome shows a hand, half doesn't — feels broken | Bake `cursor-pointer` at the primitive's cva base (Button, dialog X, DropdownMenu trigger, ellipsis row-action) (§29.2) |
+| Table header `text-[10px] uppercase tracking-wider text-muted-foreground` on a busy work surface | Users call it "too light, hardly visible" | Legibility flavor: `text-[12px] font-semibold text-foreground` (§29.7) |
+| `text-muted-foreground` on table body cells | Reads as disabled; user can't scan | `text-foreground` (or `/70` for secondary cols); hover row provides contrast (§29.7) |
+| `text-muted-foreground` on inactive sidebar nav items | Whole sidebar reads washy | `text-foreground/80` for inactive, `text-foreground` + tinted bg for active |
+| Inset-shadow / two-tone border / `shadow-sm` on `<Input>` | Reads as artifact at small sizes; users flag it | Flat 1px border + clean focus ring (§29.3) |
+| Raw `<select>` in form chrome | OS chevron + extra padding break h-8 row alignment | `NativeSelect` wrapper: `appearance-none` + absolute lucide `ChevronDown` (§29.3) |
+| Mixing density flavors (h-8 button next to h-7 input, or vice versa) | Looks broken — one or the other reads as miniature | Commit to ONE density at the primitive layer in one pass (§29.1.5) |
+| Sidebar uppercase tracking-wider tiny section labels on chrome | Reads as washy / disabled on a panel the user scans | Mixed-case `text-[11px] font-semibold text-foreground/80` (§29.1.5) |
+| Dialog footer flush against body (no separator) | Bottom buttons drift up; body feels cramped | 3-zone pattern with `border-b` header + `border-t bg-muted/40` footer (§29.5) |
+| Opacity-dimmed borders (`border-border/40`, `/60`, `/80`) on chrome edges | User flags as "hardly visible" | Solid `border-border` (§29.1.5) |
 | Viewer with `overflow-auto` but no `h-full` | Content overlays siblings OR clips without scrollbar | Always `h-full w-full overflow-auto` (§12) |
 | `className="sm:w-[480px]"` on `<SheetContent>` | Base data-attr classes win; override is no-op | `style={{ width: "480px", maxWidth: "100vw" }}` (§10) |
 | Dialog without `max-h-[calc(100dvh-2rem)]` | Long content bleeds off viewport top + bottom | Apply once in `DialogContent` base (§10) |
@@ -1093,6 +1148,32 @@ This is the visual rulebook — exact classNames, dimensions, color maps. When i
 
 Don't author a third wrapper variant. Two shapes, clear trigger for each.
 
+### 29.1.5 · Density flavor — pick ONE per project
+
+ubgo ships with `h-8` chrome buttons + `h-8` inputs as default (the dense-UI ideal). **Some products want denser** — Shopify Polaris, Linear, Vercel. When the user says "make it more compact / sleek / Polaris-grade / Linear-tight", switch the whole project to the Polaris-dense flavor in ONE pass — don't iterate per page. Mixed densities feel worse than either alone.
+
+| Token | Default flavor (h-8) | Polaris-dense flavor (h-7) |
+|---|---|---|
+| Button chrome | `h-8 px-3 text-[13px] font-medium rounded-lg` | `h-7 px-3 text-[12px] font-medium rounded-lg` |
+| Button xs | `h-7 px-2.5 text-[12px]` | `h-6 px-2 text-[11px] rounded-md` |
+| Input | `h-8 px-2.5 text-[13px] rounded-lg` | `h-7 px-2.5 text-[12px] rounded-md` |
+| Dialog title | `text-base font-medium` | `text-[15px] font-semibold` |
+| Dropdown item | `py-1.5 text-sm [&_svg]:size-4` outer `p-1` | `py-1 text-[12px] [&_svg]:size-3.5` outer `p-0.5` |
+| Sidebar nav item | `px-3 py-2 rounded-lg` icons `size-4` | `px-2 py-1.5 rounded-md` icons `size-[16px]` |
+| Sidebar section label | `text-[10px] uppercase tracking-wider text-muted-foreground` | `text-[11px] font-semibold text-foreground/80` (mixed-case) |
+| Table header | `text-[10px] uppercase tracking-wider text-muted-foreground` | `text-[12px] font-semibold text-foreground` (legibility flavor — §29.7) |
+| Row hover | `hover:bg-muted/40` | `hover:bg-muted/60` |
+
+**Visual style invariants** in the Polaris-dense flavor:
+
+- No shadows on buttons (`shadow-none`); the only press feedback is `active:translate-y-px`.
+- No `shadow-sm` / inset-tricks on inputs — flat 1px border + clean focus ring.
+- Borders use solid `border-border` (NOT `/40`, `/60`, `/80` opacity-dimmed variants). Opacity-dimmed borders read as "hardly visible" feedback at small sizes.
+- Section labels are mixed-case + semibold, NOT uppercase tracking-wider tiny. The uppercase-tracker pattern is editorial-tasteful but reads as washy on chrome the user has to scan.
+- Sidebar inactive items: `text-foreground/80` (NOT `text-muted-foreground` — too washy). Active: `bg-primary/10 text-primary` + no shadow.
+
+Failure mode of mixing flavors: chrome button h-7 next to input h-8 = button looks miniature. Default flavor everywhere OR Polaris-dense everywhere; commit at the primitive layer (Button.tsx, Input.tsx, etc.) in one pass.
+
 ### 29.2 · Button system
 
 | Token | className | Use |
@@ -1142,8 +1223,9 @@ icon-lg  size-9 px-0
 
 - **Icon-text gap: always `gap-1.5`.**
 - SVG inside button defaults to `size-3.5` unless overridden.
+- **`cursor-pointer` is baked into the base classes** — every variant (default, ghost, link, destructive) gets the hand pointer. Bake at the cva base, paired with `disabled:cursor-not-allowed`, so call sites never have to remember. Same rule applies to every other interactive primitive that wraps a `<div>` / `<button>` without a real anchor: dialog close X, DropdownMenu trigger, custom ellipsis row-action buttons, AccordionTrigger. If it clicks, it shows the pointer. Failure mode without this: half the chrome shows a hand, the other half a text I-beam — feels broken even when behavior is correct.
 - Active press: `active:translate-y-px` (1px down — already baked into base).
-- Disabled: `disabled:opacity-50 disabled:pointer-events-none` (baked).
+- Disabled: `disabled:opacity-50 disabled:pointer-events-none disabled:cursor-not-allowed` (baked).
 - Loading: `disabled={isSubmitting}` + change label to `"Creating…"` (ellipsis char `…`, not three dots). Never spin a spinner without also disabling.
 - In dialogs: ALWAYS use the size that lands at `h-8` on footer buttons. In shadcn-baseline projects that's `size="sm"`. In compact-default projects that's `size="default"`. Never let a footer button render at `h-9`+ — looks oversized.
 - Top-of-page CTAs (the "New X" button in PageHeader's right slot) follow the same rule: render at `h-8`. Same size mapping applies.
@@ -1196,6 +1278,32 @@ text-[13px]
 ```
 
 Textarea: same base, plus `field-sizing-content min-h-16 rows={5}` (default) or `rows={2}` (compact).
+
+**No inset-shadow / two-tone-border tricks on inputs.** The "Polaris depth" patterns (`border-t-foreground/30`, `inset shadow-inner`, double-border focus rings) read as a box-shadow artifact at small sizes and users call them out as visual bugs. Flat 1px border + clean focus ring is the canonical look. Same for `shadow-sm` — kill it on inputs; reserve elevation for popovers / dropdowns / dialogs.
+
+**Native HTML `<select>` ships with an OS-level chevron + extra padding that don't match Input.** Wrap with `appearance-none` + an absolute lucide `ChevronDown` to align with Input visually:
+
+```tsx
+export function NativeSelect({ className, children, ...props }: SelectProps) {
+  return (
+    <div className="relative inline-block w-full">
+      <select
+        className={cn(
+          "appearance-none border-input bg-background flex h-8 w-full rounded-lg border px-2.5 pr-7 text-[13px] outline-none",
+          "focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </select>
+      <ChevronDown aria-hidden className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+    </div>
+  )
+}
+```
+
+Use this primitive (or the project's Base UI `Select`) — never a raw `<select>` in form chrome. Failure mode of raw `<select>`: OS chevron + extra OS padding give it ~h-9 visual height inside an h-8 form row and a second chevron-like artifact at the bottom border on macOS.
 
 ### 29.4 · Form layout
 
@@ -1250,6 +1358,25 @@ Title: `font-heading text-base leading-none font-medium`. Description: `text-sm 
 
 Footer (when present) extends to dialog edges via negative margins: `-mx-4 -mb-4 px-4 py-3 border-t bg-muted/50 rounded-b-xl`.
 
+**3-zone pattern (Polaris-grade).** When a dialog has more than 2 form fields OR scrollable body content, split it into Header / Body / Footer with separator lines. Each zone owns its own padding; the body scrolls, the header and footer stay pinned. Bodies that try to share padding with header/footer feel cramped and the bottom buttons drift up the page when content is short.
+
+```tsx
+<DialogContent className="p-0 gap-0">
+  <DialogHeader className="px-4 py-3 border-b border-border">
+    <DialogTitle className="text-[15px] font-semibold">Create API key</DialogTitle>
+  </DialogHeader>
+  <DialogBody className="px-4 py-3 overflow-y-auto">
+    {/* fields */}
+  </DialogBody>
+  <DialogFooter className="px-4 py-2.5 border-t border-border bg-muted/40 rounded-b-xl">
+    <Button variant="outline">Cancel</Button>
+    <Button>Create</Button>
+  </DialogFooter>
+</DialogContent>
+```
+
+The close X (top-right corner) needs `cursor-pointer` baked into its className — same rule as §29.2 applies to every interactive primitive.
+
 ### 29.6 · Card
 
 ```
@@ -1270,16 +1397,17 @@ Use a card when: standalone panel with distinct hierarchy, grouped settings, das
 
 ### 29.7 · Table / ServerDataTable
 
-**Header row:**
+**Header row — pick ONE flavor per project, don't mix:**
 
-```
-bg-surface-1 sticky top-0 border-b border-border
-font-mono text-[10px] font-medium uppercase tracking-wider text-muted-foreground
-px-3 py-2
-```
+- *Editorial* (default in tasteful admin UIs): `font-mono text-[10px] font-medium uppercase tracking-wider text-muted-foreground` — looks tasteful in calm screens, but on busy data screens users routinely call this "too light, hardly visible". If the user gives that feedback once, switch the whole project to legibility flavor — don't patch one page.
+- *Legibility* (Shopify Polaris / Linear flavor): `text-[12px] font-semibold text-foreground` (NOT `text-muted-foreground`). Same row: `bg-muted/50 sticky top-0 border-b border-border px-3 py-2`. Use when the table is the page's primary work surface and rows are scanned for action, not contemplated.
+
+Common shell either way: `bg-surface-1 sticky top-0 border-b border-border px-3 py-2`.
 
 **Data row (default density):** `h-9 py-1.5 text-[13px] px-3 border-b border-border/60 last:border-b-0 hover:bg-muted/40 transition-colors`
 **Data row (compact density):** `h-7 py-1 text-[13px]` (same rest)
+
+**Body cell legibility:** primary identifying columns use `text-foreground` (or `font-medium` for the name column). Secondary columns may use `text-foreground/70`. **Never `text-muted-foreground` for body cells the user has to scan** — it reads as disabled. The hover row background already provides contrast; you don't need to dim the rest.
 **Selected row:** `bg-primary/5`
 **Checkbox column:** `w-9 px-3 py-2`
 **Actions column (icon cluster):** `w-30 text-right pr-2`

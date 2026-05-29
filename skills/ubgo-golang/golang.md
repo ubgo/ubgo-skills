@@ -1040,13 +1040,89 @@ When you embed, do it because you genuinely want the full method set surfaced AN
 
 ## 27 · Secrets
 
-- **Read from env / secret manager.** Never hardcoded. In our PKL configs that's `read("env:VAR_NAME")` on every secret field.
-- **`field.String("password").Sensitive()`** on ent fields holding secrets — strips from logs/debug.
+### 27.0 · AI-AGENT: READ THIS FIRST
+
+A failure pattern that has bitten real sessions: an AI agent pastes a real credential the human shared (in chat, in a `.env` they were debugging, in a log excerpt) into a "for reference, rotate when convenient" note in a tracked doc. Then commits and pushes. Then the credential is unrotatable because it's a customer's production value, and the recovery cost is a delete-and-recreate of the remote repo + a force-push of a scrubbed history + permanent residual risk that some scraper got there first.
+
+The shapes the agent talks itself into — every variation has actually happened:
+
+| Anti-pattern | Why the agent reaches for it | Why it's wrong |
+|---|---|---|
+| "I'll paste the real token in the gotcha doc so future-me knows which token it is" | Future-me will need to identify which credential broke things | The doc lives in git; git lives on a remote; bots scrape remotes within minutes of push |
+| "It's a private repo, fine" | Conservation of effort | Private repos still leak via forks, mirrors, ex-employee clones, CDN caches, and any future visibility change |
+| "I'll scramble a few characters so it's not the *real* token" | Plausible-looking deniability | Token shape is recoverable; the prefix + length give it away; brute-force fills the rest |
+| "It's in a Go comment, the linter won't catch it" | Comments are "just text" in my head | They're text in `git diff` too |
+| "It's a dev/test value, not prod" | Trying to convince myself it's safe | When you're wrong, you're wrong with prod |
+| "I'll just add it to the migration's pre-flight SQL example block" | The example needs to be runnable | Runnable doesn't require *the actual value*; placeholders like `<TOKEN>` work fine |
+| "I'll write the failure-mode postmortem with the real token in it so future agents see what to avoid" | Vivid examples teach better | The postmortem doc gets committed too. The teaching value is the *shape*, never the value. |
+
+**THE RULE, restated for any AI agent reading this section in a future session:**
+
+> If a value's shape matches anything in §27.2's pattern list, it does NOT go into any file the agent writes. Not in `.go`, not in `.md`, not in a commented-out line, not in a `// usage example`, not in a `// remember to rotate this` breadcrumb, not in a postmortem describing how the value leaked. Not even "temporarily, I'll redact before commit". The pre-commit hook catches most of it; the rest depends on the agent acquiring the reflex to TYPE the placeholder (the literal text `shpat_xxx` or `<TOKEN>` or `${SOMETHING_TOKEN}`) rather than the literal value, every single time, every file.
+>
+> When the human SHOWS the agent a real credential in chat (paste, screenshot, log excerpt), the agent does NOT echo it back, does NOT save it to a memory store, does NOT write it into a "rotate this later" note. The agent acknowledges the value's existence in abstract terms (`"the Shopify token the user shared"`, `"the OpenAI key in the log"`) and tells the human to put it in `.env` themselves.
+
+If the agent reads this paragraph and the next move is "but the user explicitly asked me to put it in a comment so they could find it later" — STOP. The user is not the threat model. Scrapers, fork holders, CDN caches, and copy-paste accidents are. The user can always look the value up in their `.env`; they cannot un-paste it from a public commit.
+
+**Test the rule before writing anything:** before saving any file, the agent scans its own draft for any substring matching the §27.2 patterns. If a match exists and isn't allow-listed (a literal placeholder like `shpat_xxx`), it's a refuse — rewrite the draft with `<TOKEN>` or `${TOKEN_ENV_VAR}` and try again. This is cheaper than discovering it via the pre-commit hook, much cheaper than discovering it via a code-search scraper.
+
+The rest of this section is the operational support for the rule.
+
+### 27.1 · The hard rules (no exceptions)
+
+- **NEVER paste a real credential into ANY tracked file.** Not in `.go`, not in `.md`, not in a `// commented-out` block, not in a CLI usage example, not in a test fixture, not in a README "for reference", not in a CLAUDE.md gotcha doc, not in a commit message. Even "I'll rotate it later" — no. The minute the literal value sits in a git diff, assume scrapers have it within minutes of `git push`. Public-repo Shopify tokens (`shpat_…`), AWS keys (`AKIA…`), Stripe keys (`sk_live_…`), OpenAI/Anthropic keys (`sk-…`), and GitHub PATs (`ghp_…`) all have known harvesters watching commit feeds; even private-repo commits leak via misconfigured cache CDNs, accidental forks, and former-employee clones.
+- **Real credentials live in `.env` (gitignored) and ONLY in `.env`.** The repo's `.env` is per-machine, never committed. A committed `sample.env` ships with placeholder values only (`shpat_xxx`, `sk-xxx`, etc.).
+- **Reach into Go via `os.Getenv` (raw) or the project's config layer** (PKL `read("env:VAR_NAME")` in this stack). Never via a string literal inside the source file.
+- **Docs + examples use placeholders.** When showing usage in a README / CLAUDE.md / package doc, the placeholder is the literal text `shpat_xxx` or `<TOKEN>` — never a real one, never a "scrambled" one (scramblers fail; the original key shape is recoverable).
+- **`field.String("password").Sensitive()`** on every ent field holding a secret — strips from logs / debug / `String()` output.
 - **`lace/crypt`** (AES) for anything encrypted at rest in the DB. CLI for one-off encrypt/decrypt: `go run ./saas/cmd/cli crypt -e "value"` / `-d "encrypted"`.
 - **`subtle.ConstantTimeCompare`** for API-key comparisons — timing-attack-safe.
-- **Gitignored:** `_keys/`, `.env`, `.env.prod`, `.github/.secrets`. Verify before committing.
+- **Gitignored at the start of every project:** `.env*`, `_keys/`, `*.pem`, `*.key`, `*.creds`, `.github/.secrets*`. Verify with `git check-ignore` before adding any sensitive-looking file.
 
-**If a secret leaked** into code or git history, ROTATE it before doing anything else. `git log -p --all -S 'secret-value'` finds every commit it landed in. Use `git filter-branch` or BFG to scrub history, then force-push (coordinate with the team).
+### 27.2 · Pre-commit secret scanner (defense-in-depth)
+
+Human attention loses to fatigue; `git config core.hooksPath` doesn't. Every Go project of ours ships with `.githooks/pre-commit` that scans staged additions for credential-shaped patterns and refuses the commit if it finds one. Activated per-clone via a `task hooks:install` Taskfile entry (each dev runs it once after `git clone`).
+
+The scanner refuses any commit whose added lines match these patterns (each new shape we encounter gets added to the list — the list grows, never shrinks):
+
+```
+shpat_[a-f0-9]{32}            Shopify Admin API access token
+shpca_[a-f0-9]{32}            Shopify customer token
+shpss_[a-f0-9]{32}            Shopify storefront token
+sk-[A-Za-z0-9]{20,}           OpenAI / Anthropic style
+sk-proj-[A-Za-z0-9_-]{20,}    OpenAI project keys
+ghp_[A-Za-z0-9]{36}           GitHub PAT
+gho_[A-Za-z0-9]{36}           GitHub OAuth
+AKIA[0-9A-Z]{16}              AWS access key id
+aws_secret_access_key\s*=\s*[A-Za-z0-9/+=]{40}
+-----BEGIN [A-Z ]*PRIVATE KEY-----
+rk_(live|test)_[A-Za-z0-9]{20,}    Stripe restricted
+sk_(live|test)_[A-Za-z0-9]{20,}    Stripe secret
+```
+
+An `ALLOW_RE` substring list takes precedence so deliberate placeholders (`shpat_xxx`, `shpat_…`, `sk-xxx`, `REDACTED`) commit cleanly. Bypass via `git commit --no-verify` exists for emergencies but the rule is: **if you find yourself bypassing, the matching pattern needs a new ALLOW_RE entry so the next dev doesn't have to bypass.**
+
+Reference implementation lives in every project as `.githooks/pre-commit`. Install via `task hooks:install` (`git config --local core.hooksPath .githooks`). The hook is committed to the repo so every clone has identical detection logic.
+
+### 27.3 · If a secret already leaked
+
+`git log --all -p -S 'secret-value' --pretty=format:'%H %s'` finds every commit that introduced or removed the literal string. Then choose your blast radius:
+
+1. **ROTATE FIRST, scrub second.** The token is public from the moment it lands on a remote — scrubbing history reduces the window for fresh discovery, it does not invalidate the leaked value. If rotation is genuinely impossible right now (the customer needs to coordinate), the scrub is still worth doing but you must explicitly accept that the credential is compromised until rotated.
+2. **`git filter-repo --replace-text patterns.txt`** is the modern tool (BFG and `git filter-branch` work but filter-repo is faster and safer). The replacements file uses `==>` to map each literal/regex to a redacted placeholder:
+   ```
+   shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx==>[REDACTED-SHOPIFY-TOKEN]
+   regex:shpat_[a-f0-9]{32}==>[REDACTED-SHOPIFY-TOKEN]
+   ```
+3. **Force-push** to the same remote OR (the most aggressive option) delete the remote repo and recreate empty (`gh repo delete <org>/<name> --yes && gh repo create <org>/<name> --private && git push -u --force origin main`). Deleting wipes PRs / issues / actions / fork links / stars; it does NOT touch existing forks or GitHub's edge caches (those persist 30–90 days; for serious leaks file a GitHub support ticket asking for cached-view + fork purge with the affected commit SHAs).
+4. **Clean every remote-tracking ref locally** before the local-repo `git gc --prune=now --aggressive` — refs/remotes/origin/* still pin the old commits and prevent GC. Either `git remote remove origin` then re-add, or delete the refs by hand.
+5. **Stage a backup before any history rewrite** — `git bundle create /tmp/<repo>-backup-$(date +%Y%m%d-%H%M%S).bundle --all`. The rewrite is irreversible without it.
+
+### 27.4 · Operational habits that prevent re-occurrence
+
+- When dropping a "for reference" credential into a gotcha note, do NOT include even a prefix — name the credential by its **purpose-derived alias** (`SHOPIFY_BADNO_TOKEN`, `OPENAI_PROD_KEY`) and put the real value in `.env` only. The alias is the value the doc references; the real secret lives in `.env` exclusively. Even a "prefix only" leak gives scrapers enough to begin enumerating.
+- For development convenience CLIs (`saas/cmd/cli auth bootstrap --owner-password=…`), default the secret to a fixed dev string (`admin`) AND refuse the default in `CONFIG_ENV=prod`. Document the env override (`AUTH_BOOTSTRAP_PASSWORD=…`) in the same `--help` text. Same shape protects every "for local dev" credential.
+- When pasting an example into a chat reply, redact the credential first. The chat log lives forever.
 
 ---
 
@@ -1089,6 +1165,117 @@ When you embed, do it because you genuinely want the full method set surfaced AN
 
 ---
 
+## 29.5 · Multi-tenant safety — workspace/tenant isolation
+
+When a Go API serves multiple tenants (workspaces / orgs / teams / accounts) out of one DB, EVERY resolver, handler, query, and mutation must scope to the caller's tenant — and the tenant id must come from the AUTHENTICATED CONTEXT, not from a client-supplied header, URL param, query string, or input field. A cross-tenant read or write is the canonical multi-tenant security failure, and the fix is structural — the seam goes in middleware, not at each call site.
+
+### 29.5.1 · The pattern — `RequireTeam` middleware
+
+A single middleware in the auth layer extracts the workspace id from the session/JWT and stuffs it into the request context via a typed key. EVERY downstream consumer reads the workspace id from context only.
+
+```go
+// authmw/team.go
+type workspaceCtxKey struct{}
+
+// RequireTeam ensures the session has an active workspace and pins it into ctx.
+// Resolvers + queries that handle tenant data must wrap or pull from this.
+func RequireTeam(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess := SessionFromContext(r.Context())
+		if sess == nil || sess.WorkspaceID == "" {
+			http.Error(w, "no active workspace", http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), workspaceCtxKey{}, sess.WorkspaceID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func WorkspaceFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(workspaceCtxKey{}).(string)
+	return id, ok && id != ""
+}
+```
+
+Every resolver / service method that touches tenant data takes `ctx`, calls `WorkspaceFromContext(ctx)`, and uses the returned id to scope its query — NEVER an id from the input struct, NEVER an id from a header, NEVER an id from the URL.
+
+```go
+func (r *queryResolver) Products(ctx context.Context) ([]*ent.Product, error) {
+	wsID, ok := authmw.WorkspaceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("no workspace")
+	}
+	return r.db.Product.Query().Where(product.WorkspaceID(wsID)).All(ctx)
+}
+```
+
+Anti-pattern (cross-tenant read waiting to happen):
+
+```go
+// BAD — workspace ID comes from the request input, not the context
+func (r *queryResolver) Products(ctx context.Context, input ProductFilter) ([]*ent.Product, error) {
+	return r.db.Product.Query().Where(product.WorkspaceID(input.WorkspaceID)).All(ctx)
+}
+```
+
+A caller authenticated for workspace A can pass `input.WorkspaceID = B` and read B's products. Even if the front end doesn't do this, an attacker poking at the GraphQL endpoint will.
+
+### 29.5.2 · Owner-only operations: server enforces, client is just UX
+
+When some operations are restricted (e.g. only the workspace **owner** can rename or delete a tenant, only **admin** can invite members), the client UI hides the controls — but the server enforces them again at the resolver. The client gate is UX, not a security boundary.
+
+```go
+func (r *mutationResolver) DeleteWorkspace(ctx context.Context, id string) (bool, error) {
+	wsID, _ := authmw.WorkspaceFromContext(ctx)
+	if id != wsID {
+		return false, errors.New("forbidden")
+	}
+	sess := authmw.SessionFromContext(ctx)
+	role, err := r.db.Membership.Query().
+		Where(membership.WorkspaceID(wsID), membership.UserID(sess.UserID)).
+		Only(ctx)
+	if err != nil || role.Role != "owner" {
+		return false, errors.New("only the owner can delete this workspace")
+	}
+	return true, r.db.Workspace.DeleteOneID(id).Exec(ctx)
+}
+```
+
+Two checks, one resolver: (1) the resource lives in the caller's tenant; (2) the caller has the right role. Both server-side, both unskippable.
+
+### 29.5.3 · Membership lookups belong to a service, not inline
+
+If three resolvers re-implement the "is this user an owner?" check, the fourth will get it wrong. Centralize:
+
+```go
+// authsvc/membership.go
+func (s *Service) MustBeOwner(ctx context.Context, wsID, userID string) error {
+	m, err := s.db.Membership.Query().
+		Where(membership.WorkspaceID(wsID), membership.UserID(userID)).
+		Only(ctx)
+	if err != nil {
+		return fmt.Errorf("no membership: %w", err)
+	}
+	if m.Role != "owner" {
+		return errors.New("forbidden: owner only")
+	}
+	return nil
+}
+```
+
+Resolvers call `s.auth.MustBeOwner(ctx, wsID, sess.UserID)`. One implementation, one place to fix the role-check logic.
+
+### 29.5.4 · Audit gate before shipping a multi-tenant change
+
+Before merging any PR that touches a tenant-scoped resolver or query, run:
+
+```bash
+# Every Where clause that filters by workspaceID should source from context, not input.
+rg "WorkspaceID\(.*input\.|WorkspaceID\(.*req\.|WorkspaceID\(.*params\." -t go
+```
+
+Any hit is a cross-tenant vulnerability — replace with the `WorkspaceFromContext(ctx)` shape from §29.5.1.
+
 ## 30 · Anti-pattern catalog
 
 | Anti-pattern | Why banned | What to do instead |
@@ -1130,6 +1317,9 @@ When you embed, do it because you genuinely want the full method set surfaced AN
 | Embedding a wide-API type (`*http.Client`, `*sql.DB`) on a service struct | Consumers can't tell which methods are yours | Composition via a named field (§26) |
 | Hardcoded secret in code / committed `.env` | Leak risk; rotation gets hard | PKL `read("env:VAR")` + gitignore (§27) |
 | Logging a sensitive ent field | Plaintext password / token in logs | `field.String(...).Sensitive()` (§27) |
+| Resolver/handler reads `workspaceID` from input / URL param / header | Cross-tenant read or write; canonical multi-tenant security failure | `WorkspaceFromContext(ctx)` set by `RequireTeam` middleware; never trust the client (§29.5.1) |
+| Owner-only check ONLY on the client (button hidden) | Curl/GraphQL clients bypass instantly | Server-side resolver enforces role + tenant match every call (§29.5.2) |
+| Re-implementing membership/role checks in each resolver | Drift; the 4th one will be wrong | Centralize in `authsvc.MustBeOwner` / `MustHaveRole` (§29.5.3) |
 
 ---
 
@@ -1162,6 +1352,7 @@ Before saying a Go change is "done":
 - [ ] §25 — JSON tags explicit; `omitempty` only on pointer-or-string fields; `crypto/rand` for secrets
 - [ ] §27 — no hardcoded secrets; sensitive ent fields use `.Sensitive()`
 - [ ] §28 — if schema changed: backup taken, migration verified, row counts preserved
+- [ ] §29.5 — every tenant-scoped resolver/handler sources `workspaceID` from `WorkspaceFromContext(ctx)`, NOT from input / URL / header; owner/role checks enforced server-side (run `rg "WorkspaceID\(.*input\." -t go` — expect zero hits)
 - [ ] Build clean across the workspace
 - [ ] Tests pass
 - [ ] **Project rules read** (`golang-project.md` for THIS project's specifics on top of the above)
