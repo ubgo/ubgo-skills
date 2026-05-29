@@ -6,14 +6,19 @@ Each skill lives in its own directory under `skills/` containing a `SKILL.md` wi
 
 ## Install
 
-Via [skills.sh](https://www.skills.sh/) (the open-source `skills` CLI):
+**Option A — Symlink mode** (recommended for maintainers; live edits in this repo appear in the agent immediately):
 
 ```bash
-# install the whole collection
-npx skills add ubgo/ubgo-skills
+git clone https://github.com/ubgo/ubgo-skills && cd ubgo-skills
+task install                      # symlinks every skills/<name>/ → ~/.claude/skills/<name>
+```
 
-# or browse first
-npx skills
+Per-agent variants: `task install:cursor` · `install:codex` · `install:windsurf` · `install:cline` (symlink into the current project's rules dir). Run `task --list` for the full menu. Pull upstream + re-sync new skills with `task update`. Sanity check frontmatter with `task validate`.
+
+**Option B — CLI install** via [skills.sh](https://www.skills.sh/) (no clone):
+
+```bash
+npx skills add ubgo/ubgo-skills   # or `npx skills` to browse first
 ```
 
 Then restart your agent (or reload skills) and invoke a skill by its frontmatter `name`.

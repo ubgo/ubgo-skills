@@ -1,0 +1,239 @@
+version: '3'
+
+# Taskfile for installing the ubgo-skills collection into agent skill directories.
+#
+# Two install modes:
+#   1. `task install`              → symlink every skills/<name>/ into ~/.claude/skills/<name>.
+#      Live edits in this repo appear in the agent immediately. Best for the
+#      maintainer or anyone who wants to track upstream `git pull` automatically.
+#
+#   2. `task install:cli`          → install via the skills.sh CLI from GitHub.
+#      Best for downstream users who don't want a clone of this repo.
+#
+# Per-agent symlink targets:
+#   task install:claude            → ~/.claude/skills/             (Claude Code, global)
+#   task install:cursor            → ./.cursor/rules/              (Cursor, current repo)
+#   task install:codex             → ./.codex/rules/               (Codex, current repo)
+#   task install:windsurf          → ./.windsurf/rules/            (Windsurf, current repo)
+#   task install:cline             → ./.clinerules/                (Cline, current repo)
+#
+# Uninstall mirrors the above:
+#   task uninstall                 → remove from ~/.claude/skills/
+#   task uninstall:<agent>         → remove from the agent's path
+#
+# Sync after pulling new skills:
+#   task update                    → git pull + re-symlink all skills (idempotent)
+#
+# Sanity:
+#   task list                      → show which skills are currently installed
+#   task validate                  → check every SKILL.md has required frontmatter
+
+vars:
+  SKILLS_DIR: '{{.TASKFILE_DIR}}/skills'
+  CLAUDE_SKILLS_DIR: '{{.HOME}}/.claude/skills'
+
+tasks:
+
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # ─── Primary install (symlink mode, for maintainers + power users) ──────────
+
+  install:
+    desc: 'Symlink every ubgo-* skill into ~/.claude/skills/ (live edits propagate)'
+    deps: [install:claude]
+
+  install:claude:
+    desc: 'Symlink each skills/<name>/ → ~/.claude/skills/<name> (idempotent)'
+    cmds:
+      - mkdir -p "{{.CLAUDE_SKILLS_DIR}}"
+      - |
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          target="{{.CLAUDE_SKILLS_DIR}}/$name"
+          if [ -L "$target" ]; then
+            existing=$(readlink "$target")
+            if [ "$existing" = "$skill_dir" ] || [ "$existing" = "${skill_dir%/}" ]; then
+              echo "✓ $name (already linked)"
+              continue
+            fi
+            echo "↻ $name (re-linking from $existing)"
+            rm "$target"
+          elif [ -e "$target" ]; then
+            echo "✗ $name (a non-symlink already exists at $target — skipping)"
+            continue
+          fi
+          ln -s "${skill_dir%/}" "$target"
+          echo "✓ $name → $target"
+        done
+
+  install:cursor:
+    desc: 'Symlink skills into ./.cursor/rules/ of the current project'
+    cmds:
+      - mkdir -p ./.cursor/rules
+      - |
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          ln -sfn "${skill_dir%/}" "./.cursor/rules/$name"
+          echo "✓ $name → ./.cursor/rules/$name"
+        done
+
+  install:codex:
+    desc: 'Symlink skills into ./.codex/rules/ of the current project'
+    cmds:
+      - mkdir -p ./.codex/rules
+      - |
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          ln -sfn "${skill_dir%/}" "./.codex/rules/$name"
+          echo "✓ $name → ./.codex/rules/$name"
+        done
+
+  install:windsurf:
+    desc: 'Symlink skills into ./.windsurf/rules/ of the current project'
+    cmds:
+      - mkdir -p ./.windsurf/rules
+      - |
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          ln -sfn "${skill_dir%/}" "./.windsurf/rules/$name"
+          echo "✓ $name → ./.windsurf/rules/$name"
+        done
+
+  install:cline:
+    desc: 'Symlink skills into ./.clinerules/ of the current project'
+    cmds:
+      - mkdir -p ./.clinerules
+      - |
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          ln -sfn "${skill_dir%/}" "./.clinerules/$name"
+          echo "✓ $name → ./.clinerules/$name"
+        done
+
+  # ─── CLI install (downstream users via skills.sh) ───────────────────────────
+
+  install:cli:
+    desc: 'Install the collection via the skills.sh CLI (no clone needed)'
+    cmds:
+      - npx skills add ubgo/ubgo-skills
+
+  # ─── Uninstall ──────────────────────────────────────────────────────────────
+
+  uninstall:
+    desc: 'Remove ubgo-* symlinks from ~/.claude/skills/'
+    deps: [uninstall:claude]
+
+  uninstall:claude:
+    desc: 'Remove ubgo-* symlinks from ~/.claude/skills/ (skips non-symlinks)'
+    cmds:
+      - |
+        if [ ! -d "{{.CLAUDE_SKILLS_DIR}}" ]; then
+          echo "{{.CLAUDE_SKILLS_DIR}} does not exist — nothing to do."
+          exit 0
+        fi
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          target="{{.CLAUDE_SKILLS_DIR}}/$name"
+          if [ -L "$target" ]; then
+            rm "$target"
+            echo "✗ removed $target"
+          elif [ -e "$target" ]; then
+            echo "⚠ $target is not a symlink — leaving it alone"
+          fi
+        done
+
+  uninstall:cursor:
+    desc: 'Remove ubgo-* symlinks from ./.cursor/rules/'
+    cmds:
+      - |
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          [ -L "./.cursor/rules/$name" ] && rm "./.cursor/rules/$name" && echo "✗ removed ./.cursor/rules/$name"
+        done
+
+  uninstall:codex:
+    desc: 'Remove ubgo-* symlinks from ./.codex/rules/'
+    cmds:
+      - |
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          [ -L "./.codex/rules/$name" ] && rm "./.codex/rules/$name" && echo "✗ removed ./.codex/rules/$name"
+        done
+
+  uninstall:windsurf:
+    desc: 'Remove ubgo-* symlinks from ./.windsurf/rules/'
+    cmds:
+      - |
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          [ -L "./.windsurf/rules/$name" ] && rm "./.windsurf/rules/$name" && echo "✗ removed ./.windsurf/rules/$name"
+        done
+
+  uninstall:cline:
+    desc: 'Remove ubgo-* symlinks from ./.clinerules/'
+    cmds:
+      - |
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          [ -L "./.clinerules/$name" ] && rm "./.clinerules/$name" && echo "✗ removed ./.clinerules/$name"
+        done
+
+  # ─── Sync after upstream changes ────────────────────────────────────────────
+
+  update:
+    desc: 'git pull + re-run install:claude (picks up newly added skills)'
+    cmds:
+      - git pull --ff-only
+      - task: install:claude
+
+  # ─── Inspection ─────────────────────────────────────────────────────────────
+
+  list:
+    desc: 'Show which ubgo-* skills are installed in ~/.claude/skills/'
+    cmds:
+      - |
+        if [ ! -d "{{.CLAUDE_SKILLS_DIR}}" ]; then
+          echo "{{.CLAUDE_SKILLS_DIR}} does not exist."
+          exit 0
+        fi
+        echo "Installed in {{.CLAUDE_SKILLS_DIR}}:"
+        for skill_dir in "{{.SKILLS_DIR}}"/*/; do
+          name=$(basename "$skill_dir")
+          target="{{.CLAUDE_SKILLS_DIR}}/$name"
+          if [ -L "$target" ]; then
+            echo "  ✓ $name → $(readlink "$target")"
+          elif [ -e "$target" ]; then
+            echo "  ⚠ $name (exists, but not a symlink from this repo)"
+          else
+            echo "  ✗ $name (not installed)"
+          fi
+        done
+
+  validate:
+    desc: 'Check every SKILL.md has required YAML frontmatter (name, description)'
+    cmds:
+      - |
+        fail=0
+        for skill_md in "{{.SKILLS_DIR}}"/*/SKILL.md; do
+          name=$(basename "$(dirname "$skill_md")")
+          if ! head -1 "$skill_md" | grep -q '^---$'; then
+            echo "✗ $name — missing YAML frontmatter opener"
+            fail=1
+            continue
+          fi
+          if ! grep -q '^name:' "$skill_md"; then
+            echo "✗ $name — missing 'name:' in frontmatter"
+            fail=1
+          fi
+          if ! grep -q '^description:' "$skill_md"; then
+            echo "✗ $name — missing 'description:' in frontmatter"
+            fail=1
+          fi
+          if [ "$fail" = "0" ]; then
+            echo "✓ $name"
+          fi
+        done
+        exit $fail
