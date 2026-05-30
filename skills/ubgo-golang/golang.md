@@ -1124,6 +1124,35 @@ Reference implementation lives in every project as `.githooks/pre-commit`. Insta
 - For development convenience CLIs (`saas/cmd/cli auth bootstrap --owner-password=…`), default the secret to a fixed dev string (`admin`) AND refuse the default in `CONFIG_ENV=prod`. Document the env override (`AUTH_BOOTSTRAP_PASSWORD=…`) in the same `--help` text. Same shape protects every "for local dev" credential.
 - When pasting an example into a chat reply, redact the credential first. The chat log lives forever.
 
+### 27.5 · The AGENT's pre-commit ritual — run BEFORE every `git commit`
+
+The pre-commit hook (§27.2) is defense-in-depth, not the primary defense. It depends on `core.hooksPath` being configured locally — which is per-clone, not tracked, and easy for a fresh clone to be missing. The agent NEVER relies on the hook being installed. Before every `git commit` the agent is about to run, it executes this sequence and refuses the commit if any step fails:
+
+```bash
+# 1. Verify the hook is even active in this clone. If not, install it first.
+git config --local core.hooksPath
+# expected: .githooks  (any other value, or empty → run: task hooks:install)
+
+# 2. Self-scan the staged Go diff. Belt-AND-suspenders alongside the hook.
+git diff --cached --diff-filter=ACMRT -U0 -- '*.go' | grep -E '^\+[^+]' \
+  | grep -nE -- 'shpat_[a-f0-9]{32}|shpca_[a-f0-9]{32}|shpss_[a-f0-9]{32}|sk-[A-Za-z0-9]{20,}|sk-proj-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|AKIA[0-9A-Z]{16}|aws_secret_access_key\s*=\s*[A-Za-z0-9/+=]{40}|rk_(live|test)_[A-Za-z0-9]{20,}|sk_(live|test)_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+  && { echo "secret-shaped value in staged .go diff — refusing commit"; exit 1; } || echo "clean"
+
+# 3. Sweep ALL tracked file types too (.md / .yml / .yaml / .json / .env / .toml) —
+#    secrets leak into docs and configs more often than into Go.
+git diff --cached --diff-filter=ACMRT -U0 | grep -E '^\+[^+]' \
+  | grep -nE -- '<same pattern list as above>' \
+  && { echo "secret-shaped value in staged diff — refusing commit"; exit 1; } || echo "clean"
+```
+
+If step 1 reports no `core.hooksPath`, the agent runs `task hooks:install` FIRST, then re-runs the scan. The agent does NOT commit through an uninstalled hook even when the self-scan is clean — leaving the hook off compromises every future commit on this clone.
+
+**The `grep -- "$pat"` gotcha** (caught in real session): patterns that start with a hyphen (`-----BEGIN ...PRIVATE KEY-----`) get parsed by grep as flags. **Always pass `--` before the pattern argument** (`grep -E -- "$pat"`). Without `--`, grep silently rejects the pattern with `unrecognized option`, the scan keeps running, and the leading-hyphen patterns are never actually checked. The reference `.githooks/pre-commit` already has the `--` separator; if you copy the pattern list anywhere else, copy the separator too.
+
+**The "I'll just write the value and rotate it later" anti-pattern.** Re-stating because it happens often: NO. The window is "minutes of `git push`" not "later". The rotation cost is the same whether you wrote it on purpose or by accident; the leak cost is the same; the only thing skipping the scan saves is 200ms.
+
+**When the user shows a credential in chat.** The agent acknowledges abstractly ("the Shopify token you shared"), tells the user to put it in `.env` themselves, and does NOT echo the value back, does NOT save it to any memory, does NOT write it into any file the agent will later commit. The chat log is itself a persistence layer the agent has no control over.
+
 ---
 
 ## 28 · Migration discipline
@@ -1320,6 +1349,9 @@ Any hit is a cross-tenant vulnerability — replace with the `WorkspaceFromConte
 | Resolver/handler reads `workspaceID` from input / URL param / header | Cross-tenant read or write; canonical multi-tenant security failure | `WorkspaceFromContext(ctx)` set by `RequireTeam` middleware; never trust the client (§29.5.1) |
 | Owner-only check ONLY on the client (button hidden) | Curl/GraphQL clients bypass instantly | Server-side resolver enforces role + tenant match every call (§29.5.2) |
 | Re-implementing membership/role checks in each resolver | Drift; the 4th one will be wrong | Centralize in `authsvc.MustBeOwner` / `MustHaveRole` (§29.5.3) |
+| Committing without verifying `core.hooksPath=.githooks` first | Fresh clone has hooks off; the scanner you "rely on" isn't running | Agent runs `git config --local core.hooksPath` BEFORE every commit; `task hooks:install` if missing (§27.5) |
+| `grep -E "$pat"` with a pattern that may start with `-` | grep parses `-----BEGIN` as flags, scan skips it silently | Always `grep -E -- "$pat"` (§27.5) |
+| Relying on the pre-commit hook alone | Hook is per-clone, easy to be off; agent skips its own scan and assumes "hook will catch it" | Agent self-scans staged diff against the §27.2 pattern list before every commit, in addition to the hook (§27.5) |
 
 ---
 
@@ -1351,6 +1383,7 @@ Before saying a Go change is "done":
 - [ ] §24 — `gofmt` clean, `go vet`, `go test -race`, `staticcheck` (or `golangci-lint`) all green; `go mod tidy` no-op
 - [ ] §25 — JSON tags explicit; `omitempty` only on pointer-or-string fields; `crypto/rand` for secrets
 - [ ] §27 — no hardcoded secrets; sensitive ent fields use `.Sensitive()`
+- [ ] §27.5 — `git config --local core.hooksPath` returns `.githooks`; agent self-scanned the staged diff against the §27.2 pattern list (across `.go` AND all other tracked types) before invoking `git commit`
 - [ ] §28 — if schema changed: backup taken, migration verified, row counts preserved
 - [ ] §29.5 — every tenant-scoped resolver/handler sources `workspaceID` from `WorkspaceFromContext(ctx)`, NOT from input / URL / header; owner/role checks enforced server-side (run `rg "WorkspaceID\(.*input\." -t go` — expect zero hits)
 - [ ] Build clean across the workspace
