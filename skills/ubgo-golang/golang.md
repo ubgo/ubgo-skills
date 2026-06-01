@@ -526,6 +526,33 @@ field.String("api_token").Sensitive()
 
 The `Sensitive()` marker strips the field from auto-logging (`gozap` honors it via ent's marshaler).
 
+### Column / field naming — no bare nouns
+
+**Hard rule.** Column names must be explicit about what they represent. Never a bare noun that could collide with an entity, table, or future concept in the same domain. Disambiguate every name with either a role-suffix (`_status`, `_at`, `_id`, `_count`, `_url`, `_kind`, `_ref`) or a domain-prefix when the bare noun is already shared (`payout_status` not `payment_status` when a `Payment` entity exists or is plausible; `customer_phone` not `phone` when staff and partners also have phones).
+
+Bare nouns cause three failures the type system can't catch: (1) **entity collision** — `orders.payment` reads like a JSON blob of a Payment object or an FK, not a status enum, and renaming when the entity ships ripples through gqlgen + TypeScript + dashboards; (2) **call-site ambiguity** — `order.Payment()` returning a string is confusing, `order.PayoutStatus()` reads exactly as what it is; (3) **search noise** — bare-noun columns flood jump-to-definition with unrelated hits across the codebase.
+
+**The smell test.** If `git grep '\bX\b'` would match a table name AND a column name AND a Go variable, `X` is too generic — rename the column.
+
+**Bad → good, with the reason:**
+
+| ❌ Bad | ✅ Good | Why |
+|---|---|---|
+| `lifecycle` | `lifecycle_status` | states need a `_status` suffix to read as "the state of <thing>" |
+| `payment` | `payout_status` | `payment_*` already used elsewhere in the schema AND a future `Payment` entity is plausible; `payout` is the semantically accurate verb (company paying customer) |
+| `order_event` | `order_status_events` | "event" is too broad — a generic event table tempts callers to dump unrelated data into it. Be honest about scope; if generic events are needed later, give them their own table |
+| `phone` (multi-actor schema) | `customer_phone` / `member_phone` | bare `phone` becomes ambiguous the moment a second actor type acquires a phone |
+| `note` | `cancel_note` / `qc_note` | bare `note` columns accumulate undocumented usage; scope them to the workflow step |
+| `kind` (on a polymorphic table) | `<owner>_kind` (e.g. `actor_kind`) | enums named `kind` are unsearchable; prefix with the column they discriminate |
+
+**Decision algorithm.** Before writing any new `field.X("name")`, walk three questions in order:
+
+1. **Could "name" be an entity?** If yes — now OR plausibly later — add a role-suffix. `payment` → `payout_status`; `image` → `image_url`; `customer` → `customer_id`.
+2. **Is "name" already a column in this DB?** Run `git grep '\bname\b' schema/`. If hits exist, add a domain-prefix.
+3. **Will future devs JOIN on this column?** If yes, the suffix is `_id` for the FK or `_status` / `_kind` for the enum — never bare.
+
+**Verify by:** `git grep -nE 'field\.(String|Int|Enum|Bool)\("(lifecycle|payment|note|kind|phone|status|state|type)"\)' schema/` — every hit needs a role-suffix or domain-prefix justification.
+
 ---
 
 ## 13 · Validation — `valgo` for business rules
@@ -1346,6 +1373,7 @@ Any hit is a cross-tenant vulnerability — replace with the `WorkspaceFromConte
 | Embedding a wide-API type (`*http.Client`, `*sql.DB`) on a service struct | Consumers can't tell which methods are yours | Composition via a named field (§26) |
 | Hardcoded secret in code / committed `.env` | Leak risk; rotation gets hard | PKL `read("env:VAR")` + gitignore (§27) |
 | Logging a sensitive ent field | Plaintext password / token in logs | `field.String(...).Sensitive()` (§27) |
+| Bare-noun column / field name (`payment`, `lifecycle`, `note`, `kind`, `phone`) | Collides with current/future entity; ambiguous at call sites; unsearchable | Add role-suffix (`_status`, `_at`, `_id`, `_kind`) or domain-prefix (`payout_status`, `customer_phone`) (§12) |
 | Resolver/handler reads `workspaceID` from input / URL param / header | Cross-tenant read or write; canonical multi-tenant security failure | `WorkspaceFromContext(ctx)` set by `RequireTeam` middleware; never trust the client (§29.5.1) |
 | Owner-only check ONLY on the client (button hidden) | Curl/GraphQL clients bypass instantly | Server-side resolver enforces role + tenant match every call (§29.5.2) |
 | Re-implementing membership/role checks in each resolver | Drift; the 4th one will be wrong | Centralize in `authsvc.MustBeOwner` / `MustHaveRole` (§29.5.3) |
@@ -1369,7 +1397,7 @@ Before saying a Go change is "done":
 - [ ] §8 — naming follows package + struct conventions
 - [ ] §9 — services inject deps via constructor; no new globals
 - [ ] §10 + §11 — `lace/gozap` logging at boundaries; `lace/gotel` tracing where it matters
-- [ ] §12 — ORM queries use generated field constants, not strings; sensitive fields marked
+- [ ] §12 — ORM queries use generated field constants, not strings; sensitive fields marked; every new column has a role-suffix (`_status`, `_at`, `_id`, `_kind`) or domain-prefix — NO bare nouns (`payment`, `lifecycle`, `note`, `kind`)
 - [ ] §13 — business validation via `valgo` at service entry
 - [ ] §15 — new logic has table-driven tests covering happy + error paths
 - [ ] §16 — codegen helpers shipped with a runnable example
