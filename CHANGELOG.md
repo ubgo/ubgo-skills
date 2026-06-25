@@ -2,6 +2,16 @@
 
 Notable changes to skills in this repo. Format: reverse-chronological, grouped by skill, terse bullet per change. No semver pinning yet — this is a running log of what shifted and why, so consumers diffing across `npx skills update` can see what's new.
 
+## 2026-06-23
+
+### `ubgo-gomod-false-positive` (NEW)
+
+- Diagnostic playbook for the gopls false positive **"X is not in your go.mod file"** (plus `malformed module path: missing dot` and `go.work requires go >= X (running go Y)`) in `go.work` multi-module workspaces, when `go build`/`go list` pass clean. Extracted from a real multi-hour debugging session on the sync_go monorepo.
+- Golden rules: build-passing-but-gopls-erroring = tooling not code; reproduce with `gopls check <file>` before touching anything; the squiggled file is often NOT where the fix lives; `go work sync`→`go work vendor`→restart-gopls discipline; tidy-prunes-vs-sync-adds.
+- **Seven** stacked root causes, each with detect + fix: **(A) toolchain skew** — system `go` older than `go.work`'s directive; gopls forces `GOTOOLCHAIN=local` so it ignores the auto-downloaded toolchain → whole workspace fails to load → every symbol errors. Real fix = upgrade the system go (the `go.goroot`/`go.alternateTools` editor stopgap proved unreliable for the live server). **(B)** missing `replace` for dotless local modules (zero-pseudo-version pattern; error shows on the dependent module, not the missing one). **(C)** dependency version skew (`go get @version`; `go work sync` REVERTS it). **(D)** root `vendor/` (red herring for C/F). **(E)** `go`-directive mismatch across modules. **(F)** old gopls (v0.21.1) mishandling pruned-graph + local `replace` → upgrade to ≥ v0.22.0. **(G)** workspace graph desync — a single-module remote dep (often pseudo-versioned, or surfaced right after restructuring modules into `modules/`) that builds green with B–F all ruled out; `go work sync`→`go work vendor`→restart-gopls reconciles the workspace graph (added 2026-06-25; note it can flip clean even while the dep's hash is still absent from `go.work.sum`, so don't gate the diagnosis on that file).
+- Emphasis corrected after the real-session resolution: **fixes are versions (toolchain ≥ go.work, gopls ≥ v0.22.0, align the replaced module's deps), not go.mod surgery.** A "What does NOT work" section documents the dead ends — `GOFLAGS=-mod=mod` (rejected by the live server in workspace mode), blank-import `deps.go` whack-a-mole, `GOWORK=off`, and removing the root vendor.
+- Copy-paste fast-triage block + a "why this is confusing" meta-lesson (causes stack; A masks C+F; build stays green throughout).
+
 ## 2026-05-28
 
 ### `ubgo-frontend`

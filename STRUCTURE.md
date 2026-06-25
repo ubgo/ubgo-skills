@@ -30,6 +30,8 @@ ubgo-skills/
     ├── ubgo-wails-desktop/
     │   ├── SKILL.md
     │   └── WAILS.md       ← topic-specific body file
+    ├── ubgo-gomod-false-positive/
+    │   └── SKILL.md       ← gopls "not in go.mod" troubleshooting playbook (single-file)
     └── …
 ```
 
