@@ -649,6 +649,19 @@ For anything feeding a code generator (ent field builders, sqlc / protoc / opena
 
 CI must fail if the generated code doesn't compile or the demo's assertions fail. Skipping this lets template-level bugs ship green.
 
+### 16.1 · gqlgen: `*.resolvers.go` hold ONLY resolver methods — nothing else
+
+gqlgen **owns** the `*.resolvers.go` files. On every `gqlgen generate` it rewrites them to match the schema: it re-stitches resolver method bodies and **relocates or drops any code it doesn't recognize as a resolver** — free functions, helper types, package-level `var`/`const`, even maps. A helper you put next to a resolver "to keep it close" survives until the next codegen run, then silently moves to the bottom of the file under a `// !!! WARNING !!!` block, or vanishes — and your next edit conflicts with the regen. This bites once per project and the failure is invisible until a build breaks far from the cause.
+
+The rule:
+
+- **A `*.resolvers.go` file contains only resolver methods** (`func (r *xResolver) Field(ctx, …)`) plus the gqlgen-managed boilerplate. No free functions, no helper types, no shared maps/consts, no auth helpers.
+- **Every helper a resolver calls lives in a separate package**, not a sidecar `.go` file in the resolver package either if the project convention forbids it (some do — check the overlay). The portable default: a sibling internal package, e.g. `internal/<domain>fn/` (`orderfn`, `metricsfn`), with the resolver-facing symbols exported and the resolver calling `orderfn.CanManageOrder(ctx, …)`.
+- **Keep resolver bodies one-line-delegated** (§1): the resolver validates request shape + authz, then calls into a service/helper. Thin resolver, fat package — so codegen never has business logic to mangle.
+- The only non-`*.resolvers.go` file gqlgen expects in the resolver package is the package root (`resolver.go` — the `Resolver` struct + its dependencies). That one stays.
+
+Why a separate package and not just a `helpers.go` in the same package: putting helpers in the resolver package *does* survive codegen (gqlgen only rewrites `*.resolvers.go`, not sibling files), so a `helpers.go` is technically safe — but it muddies the package, and projects that want a hard boundary mandate the move. When the overlay says "resolver dir = resolver files only," obey it; otherwise a sibling `helpers.go` is the acceptable minimum.
+
 ---
 
 ## 17 · Concurrency
@@ -1377,6 +1390,7 @@ Any hit is a cross-tenant vulnerability — replace with the `WorkspaceFromConte
 | Resolver/handler reads `workspaceID` from input / URL param / header | Cross-tenant read or write; canonical multi-tenant security failure | `WorkspaceFromContext(ctx)` set by `RequireTeam` middleware; never trust the client (§29.5.1) |
 | Owner-only check ONLY on the client (button hidden) | Curl/GraphQL clients bypass instantly | Server-side resolver enforces role + tenant match every call (§29.5.2) |
 | Re-implementing membership/role checks in each resolver | Drift; the 4th one will be wrong | Centralize in `authsvc.MustBeOwner` / `MustHaveRole` (§29.5.3) |
+| Helper func / type / map / const sitting in a `*.resolvers.go` file | gqlgen relocates or drops it on the next `generate`; silent until a build breaks | Resolver files hold only resolver methods; move helpers to a sibling package, e.g. `internal/<domain>fn/` (§16.1) |
 | Committing without verifying `core.hooksPath=.githooks` first | Fresh clone has hooks off; the scanner you "rely on" isn't running | Agent runs `git config --local core.hooksPath` BEFORE every commit; `task hooks:install` if missing (§27.5) |
 | `grep -E "$pat"` with a pattern that may start with `-` | grep parses `-----BEGIN` as flags, scan skips it silently | Always `grep -E -- "$pat"` (§27.5) |
 | Relying on the pre-commit hook alone | Hook is per-clone, easy to be off; agent skips its own scan and assumes "hook will catch it" | Agent self-scans staged diff against the §27.2 pattern list before every commit, in addition to the hook (§27.5) |
