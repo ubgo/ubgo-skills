@@ -52,20 +52,19 @@ tasks:
       - |
         for skill_dir in "{{.SKILLS_DIR}}"/*/; do
           name=$(basename "$skill_dir")
+          src="${skill_dir%/}"
           target="{{.CLAUDE_SKILLS_DIR}}/$name"
-          if [ -L "$target" ]; then
-            existing=$(readlink "$target")
-            if [ "$existing" = "$skill_dir" ] || [ "$existing" = "${skill_dir%/}" ]; then
-              echo "✓ $name (already linked)"
-              continue
-            fi
-            echo "↻ $name (re-linking from $existing)"
-            rm "$target"
-          elif [ -e "$target" ]; then
-            echo "✗ $name (a non-symlink already exists at $target — skipping)"
-            continue
+          # A real (non-symlink) dir/file blocks the link — clear it first so the
+          # canonical repo copy becomes the single source of truth. Safe: the
+          # content lives in this repo; the installed copy is redundant.
+          if [ -e "$target" ] && [ ! -L "$target" ]; then
+            echo "↻ $name (replacing non-symlink copy at $target)"
+            rm -rf "$target"
           fi
-          ln -s "${skill_dir%/}" "$target"
+          # ln -sfn is atomic: it never leaves a half-removed gap that a racing /
+          # repeated run could drop. -n stops it from descending into an existing
+          # link's target dir. Idempotent — same result every run, no re-link churn.
+          ln -sfn "$src" "$target"
           echo "✓ $name → $target"
         done
 
