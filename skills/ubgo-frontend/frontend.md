@@ -593,9 +593,13 @@ Canonical names across projects (one of these exists; find yours by `grep -rln "
 - `DataTable` (shadcn projects)
 - Project-specific equivalent
 
+**Section/card containers — same sibling-grep discipline (added 2026-07-08 after a consistency callout).** Every form section / settings card / detail panel uses the project's ONE card recipe — grep a sibling page for it before writing a container (in basecn repos it is `rounded-md border bg-card p-4`). Never invent a variant (`rounded border border-border` with no bg was the violation): mixed card chrome across pages is the #1 "this app feels inconsistent" signal. **Card HEADLINES ride the same recipe** (second callout, same day): the section label inside a card is `text-[11px] font-semibold uppercase tracking-wide text-muted-foreground` (+ `mb-3` when content follows) — not an ad-hoc `text-[13px] font-medium` title.
+
 **Verify by grepping a sibling list page.** If `/metafields` / `/products` / `/collections` use `ServerDataTable`, the new entity's list page uses it too. Same shape, copy-paste pattern, fill in `columns` + `filterFields` + `sortOptions` + `queryFn`. Pages that don't follow this stick out as "messy" to anyone who knows the codebase.
 
 **Audit failure mode.** If you ship a CRUD page with a hand-rolled `<Table>`/`<table>` + `.map(row => <TR>…</TR>)`, the user notices instantly. The fix is always: rip the table out, drop in `ServerDataTable` with the columns/filters/sort/actions config, keep the create/edit dialog beside it.
+
+**No "v1 simple table now, datatable later" — CLOSED LOOPHOLE (violated twice on sync_go 2026-07-08, user called it out).** The rationalization is always "only N rows exist today / it's a first cut / SDT can come in a polish pass" — and it is wrong whenever the dataset GROWS: the datatable version IS the v1. The decision test (user-calibrated): **can this set exceed ~50–100 records?** User-created entities (feeds, products, orders, masters, workspaces, logs, runs) always can → ServerDataTable, even if only 1 row exists today (use `clientConnection` from `@/lib/client-datatable` when the API has no paging yet). Genuinely BOUNDED sets (a fixed catalog of ~6 registered workflows, an embedded run-history widget, a key/value metadata block, enum-driven rows) may use a plain table — bounded means the ceiling is structural, not "we only have a few so far." Anything that is the PRIMARY content of a route AND can grow gets the datatable. **The "it's a TREE" excuse is ALSO closed (violated a third time on sync_go 2026-07-09 — a category-tree CRUD page shipped as a hand-rolled table, user: "i asked you 100s of times").** Hierarchy does not exempt a page: load the whole tree in `queryFn`, serve it through `clientConnection`, make the DEFAULT sort the materialized path (label it "Tree") so parents sort above children, and indent the label cell by `level`. Tree semantics survive intact INSIDE ServerDataTable — there is no rendering need a plain `<table>` satisfies that SDT cannot. There are no remaining exceptions for route-primary entity lists; if one ever seems genuinely necessary, ASK the user before building, never decide it solo.
 
 ### Library
 
@@ -1057,7 +1061,7 @@ Edits get clobbered on next regen. Touch the source (route file, GraphQL schema,
 | `text-muted-foreground` on table body cells | Reads as disabled; user can't scan | `text-foreground` (or `/70` for secondary cols); hover row provides contrast (§29.7) |
 | `text-muted-foreground` on inactive sidebar nav items | Whole sidebar reads washy | `text-foreground/80` for inactive, `text-foreground` + tinted bg for active |
 | Inset-shadow / two-tone border / `shadow-sm` on `<Input>` | Reads as artifact at small sizes; users flag it | Flat 1px border + clean focus ring (§29.3) |
-| Raw `<select>` in form chrome | OS chevron + extra padding break h-8 row alignment | `NativeSelect` wrapper: `appearance-none` + absolute lucide `ChevronDown` (§29.3) |
+| ANY `<select>` in app UI — raw OR the `NativeSelect` wrapper | User rule (repeated, hard): native selects are banned in product surfaces; the OS popup breaks the design system | Base UI `Select` (styled Trigger/Content/Item) for closed sets; `Combobox` (filterable) for entity pickers — categories, channels, any list a workspace grows (2026-07-09) |
 | Mixing density flavors (h-8 button next to h-7 input, or vice versa) | Looks broken — one or the other reads as miniature | Commit to ONE density at the primitive layer in one pass (§29.1.5) |
 | Sidebar uppercase tracking-wider tiny section labels on chrome | Reads as washy / disabled on a panel the user scans | Mixed-case `text-[11px] font-semibold text-foreground/80` (§29.1.5) |
 | Dialog footer flush against body (no separator) | Bottom buttons drift up; body feels cramped | 3-zone pattern with `border-b` header + `border-t bg-muted/40` footer (§29.5) |
@@ -1281,7 +1285,7 @@ Textarea: same base, plus `field-sizing-content min-h-16 rows={5}` (default) or 
 
 **No inset-shadow / two-tone-border tricks on inputs.** The "Polaris depth" patterns (`border-t-foreground/30`, `inset shadow-inner`, double-border focus rings) read as a box-shadow artifact at small sizes and users call them out as visual bugs. Flat 1px border + clean focus ring is the canonical look. Same for `shadow-sm` — kill it on inputs; reserve elevation for popovers / dropdowns / dialogs.
 
-**Native HTML `<select>` ships with an OS-level chevron + extra padding that don't match Input.** Wrap with `appearance-none` + an absolute lucide `ChevronDown` to align with Input visually:
+**`<select>` is BANNED in product UI — including the `NativeSelect` wrapper below (user rule, repeated across sessions: "never ever the `<select>`").** Use the shared Base UI `Select` composition (`Select` + `SelectTrigger`/`SelectValue` + `SelectPositioner` > `SelectContent` > `SelectItem`, pass `items` to the Root so the trigger renders labels) for fixed closed sets, and `Combobox` (typeahead-filterable) for ENTITY pickers — categories, channels, users, anything a workspace can grow. Rule of thumb: if the list can exceed ~10 rows or the user might type to find, it is a Combobox; otherwise a styled Select. **Density lives ON the shared primitive, never per page:** the SelectTrigger base classes must equal the Input tokens (h-7, text-[12px], px-2.5, rounded-md, flat 1px border, NO shadow, focus ring-1) and items match dropdown-menu items (py-1 text-[12px], icons size-3.5) — stock shadcn ships h-9/text-sm/shadow-xs and reads "fatty" next to the dense chrome; fix the shared file once (2026-07-09). The `NativeSelect` snippet is kept ONLY for non-product chrome (throwaway internal tools) — never reach for it first:
 
 ```tsx
 export function NativeSelect({ className, children, ...props }: SelectProps) {
@@ -2010,3 +2014,10 @@ A single offender slipping through isn't end-of-world. The pattern's value is th
 - If the project uses a knowledge-base CLI (`aicodermini`, `lore`, similar), query its rules + hotfixes BEFORE substantive replies.
 - If you find yourself rewriting > 5 files without confirming the approach, STOP and check in.
 - Brainstorming ≠ implementing. Don't open tasks/runs for exploration.
+
+
+## Top-to-bottom file layout — no magic (standing order, 2026-07-11)
+
+A module reads like a story: imports → constants/types → the EXPORTED component/hook (the file's reason to exist) → unexported helper components/functions BELOW it, in usage order. Function declarations hoist, so the entry component can sit first even when it calls helpers defined later — use that. Never bury the exported component at the bottom of the file under its private sub-components.
+
+No-magic corollaries: no module-level mutable state except a documented deliberate cache (comment names the writer); no side effects at import time; a component's data arrives via props/hooks, never via a global something set elsewhere.

@@ -368,6 +368,26 @@ Unexported code: brief comments where they add clarity; skip the noise.
 
 ---
 
+### Top-to-bottom file layout — no magic (standing order, 2026-07-11)
+
+A file reads like a story, top to bottom: package doc → constants/types → the EXPORTED entry API (the reason the reader opened the file) → unexported helpers, in call order. Never bury the entry function under a pile of helpers; a reader should meet the main flow first and drill into details only when needed.
+
+```go
+// Good order:                     // Bad order:
+package foo                        package foo
+const (...)                        func helperC() {...}
+type Thing struct {...}            func helperB() {...}
+func DoTheThing(...) {...}  // ←   func helperA() {...}
+func helperA() {...}               func DoTheThing(...) {...}  // ← buried
+func helperB() {...}
+```
+
+"No magic" corollaries, same rule:
+
+- **No `init()` side effects** — wiring happens in explicit constructors called by the composition root, never by import order.
+- **No hidden package-level mutable state** — a mutable global is allowed only as a documented, deliberate cache/dedup (comment says WHO writes it and why), never as an implicit channel between functions.
+- **Explicit dataflow** — a function's inputs arrive as parameters, its outputs leave as returns. Reaching into globals/context for business data is magic; context carries cancellation + cross-cutting identity (workspace, trace) only.
+
 ## 9 · Service / package design
 
 ### Accept interfaces, return structs
