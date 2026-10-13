@@ -92,4 +92,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Short version: rules earn their place by
 
 ## License
 
-[MIT](LICENSE) © khanakia. Use these skills freely in any project, public or private; attribution appreciated but not required.
+[Apache-2.0](LICENSE) © Aman Bansal. Use these skills freely in any project, public or private; attribution appreciated but not required.

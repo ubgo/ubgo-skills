@@ -153,7 +153,7 @@ Skills here aren't semver-versioned today. Breaking changes go through the reorg
 
 ## License
 
-All contributions are licensed under the same [MIT](LICENSE) as the project. By opening a PR you confirm you have the right to contribute the change and license it under MIT.
+All contributions are licensed under the same [Apache-2.0](LICENSE) license as the project. By opening a PR you confirm you have the right to contribute the change and license it under Apache-2.0.
 
 ## Questions
 

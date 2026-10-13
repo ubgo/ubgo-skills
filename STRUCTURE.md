@@ -10,7 +10,7 @@ ubgo-skills/
 ├── CONTRIBUTING.md        ← contribution philosophy + flows + style rules
 ├── CHANGELOG.md           ← reverse-chrono log of skill changes
 ├── STRUCTURE.md           ← this file
-├── LICENSE                ← MIT
+├── LICENSE                ← Apache-2.0
 ├── .gitignore             ← node_modules, .env*, .DS_Store, *.log
 └── skills/
     ├── ubgo-golang/
