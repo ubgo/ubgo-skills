@@ -107,7 +107,7 @@ return SourceSystemShopify
 
 ## 3 · Polymorphic relations — entpoly, always
 
-Every polymorphic owner relation (a table with `owner_type` + `owner_id` discriminator pair) uses `github.com/khanakia/entx/entpoly`. Hand-rolled `owner_kind` enum columns are BANNED.
+Every polymorphic owner relation (a table with `owner_type` + `owner_id` discriminator pair) uses `github.com/ubgo/entx/entpoly`. Hand-rolled `owner_kind` enum columns are BANNED.
 
 ```go
 // schema/<table>.go
