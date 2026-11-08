@@ -47,12 +47,7 @@ The three roles are independent — loading the `train` skill doesn't auto-train
 
 <tr>
 <td><a href="skills/ubgo-golang-train/"><code>ubgo-golang-train</code></a></td>
-<td>Training loop for <code>ubgo-golang</code>. Captures universal Go learnings from real sessions back into the canonical <code>golang.md</code>. Decision tree for universal vs project vs noise, section-targeting table, voice rules, conflict reconciliation, path-discovery sync ritual. The skill gets smarter every session it's loaded.</td>
-</tr>
-
-<tr>
-<td><a href="skills/ubgo-golang-learn/"><code>ubgo-golang-learn</code></a></td>
-<td>Bootstrap a Go repo's project overlay (<code>golang-project.md</code>) that extends the universal rules with this repo's named constants, module layout, codegen task names, captured-in-blood gotchas, and workflow. Multi-agent targets (Claude / Cursor / Windsurf / Cline / Codex / Copilot / Gemini). Re-runnable.</td>
+<td>Training loop for <code>ubgo-golang</code>. Captures universal Go learnings from real sessions back into the canonical <code>golang.md</code>, and (learn mode, <code>LEARN.md</code>) bootstraps a repo's <code>golang-project.md</code> overlay. Decision tree for universal vs project vs noise, section-targeting table, voice rules, conflict reconciliation, path-discovery sync ritual. The skill gets smarter every session it's loaded.</td>
 </tr>
 
 <tr>

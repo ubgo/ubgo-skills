@@ -18,9 +18,8 @@ ubgo-skills/
     │   └── golang.md      ← the doctrine — 30+ sections
     ├── ubgo-golang-train/
     │   ├── SKILL.md
-    │   └── TRAIN.md       ← writeback ritual for golang.md
-    ├── ubgo-golang-learn/
-    │   └── SKILL.md       ← bootstrap recipe for per-repo golang-project.md
+    │   ├── TRAIN.md       ← writeback ritual for golang.md
+    │   └── LEARN.md       ← bootstrap recipe for per-repo golang-project.md
     ├── ubgo-frontend/
     │   ├── SKILL.md
     │   └── frontend.md
@@ -110,7 +109,7 @@ Train skills follow this ritual: discover canonical → edit canonical → sync 
 Optional follow-ons (separate PRs):
 
 - `skills/ubgo-<topic>-train/` with `SKILL.md` + `TRAIN.md` (template: `ubgo-golang-train`).
-- `skills/ubgo-<topic>-learn/` with `SKILL.md` describing the multi-agent overlay-emission recipe (template: `ubgo-golang-learn`).
+- A `LEARN.md` beside `TRAIN.md` in the train skill, describing the multi-agent overlay-emission recipe (template: `ubgo-golang-train/LEARN.md`).
 
 ## Cross-skill references
 

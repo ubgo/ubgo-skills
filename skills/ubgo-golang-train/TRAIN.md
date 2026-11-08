@@ -57,7 +57,7 @@ Did you learn something during Go backend work?
 ├── Is it a NAMED FACT about THIS project? (file path, repo name, module
 │   layout, named constant, customer-specific channel/tenant code,
 │   project-specific DB name / migration command / Taskfile recipe)
-│   └── YES → project overlay (golang-project.md, via ubgo-golang-learn). STOP here.
+│   └── YES → project overlay (golang-project.md, via learn mode, LEARN.md). STOP here.
 │
 ├── Is it a UNIVERSAL PATTERN any Go repo would benefit from?
 │   (a generic anti-pattern, a verbatim service pattern, a mapping rule, a
@@ -195,7 +195,7 @@ If the project vendors the skill into the repo (e.g. via `repolink` symlinks, gi
 
 Skip the write-back if any of these hold:
 
-- The lesson is project-specific (file path, customer name, DB name, repo-only convention) → overlay instead (via `ubgo-golang-learn`)
+- The lesson is project-specific (file path, customer name, DB name, repo-only convention) → overlay instead (via learn mode, `LEARN.md`)
 - The rule conflicts with an existing rule and you haven't reconciled them in the same edit
 - You're "improving" an existing rule with prose alone — add a code snippet or an anti-pattern row or it doesn't earn its place
 - The rule exists already and you're just rewording — propose the rewording in chat, get sign-off, then edit (rewording the skill body without acknowledgment confuses future diffs)
@@ -264,7 +264,7 @@ Worked precedent: the `ubgo-frontend` §29.2 button-size rewrite (sibling skill)
 |---|---|---|
 | Adding a rule without a code snippet | "Wrap errors properly" doesn't tell anyone what to type | Always include exact `fmt.Errorf("op: %w", err)` / exact `ent.…` chain |
 | Adding to §X home without §30 catalog row | §30 is the discoverability index — agents grep there first | Always do BOTH edits in one pass |
-| Writing back universal-sounding rules that name a customer / DB | Locks one project's reality into doctrine | Names go in overlays (`ubgo-golang-learn`) |
+| Writing back universal-sounding rules that name a customer / DB | Locks one project's reality into doctrine | Names go in overlays (learn mode (`LEARN.md`)) |
 | Hardcoding sync paths instead of discovering them | Doctrine baked to one developer's machine; doesn't port | §0 discovery order — `find` or ask |
 | Editing canonical without syncing every installed copy | This session's loaded skill stays out-of-date; sibling agents stay out-of-date | Sync to EVERY discovered installed path; verify with `diff -q` per copy |
 | Adding a rule that contradicts ent's actual default behaviour | Future agents follow the rule, ent contradicts at runtime, confusion | Verify against ent docs / source before committing the rule |

@@ -1,18 +1,6 @@
 ---
 name: ubgo-frontend-train
-description: >-
-  Training loop for the `ubgo-frontend` skill. Captures universal frontend
-  / UI / UX learnings encountered during real-world coding sessions back into
-  the canonical `frontend.md` so the skill keeps getting smarter with use.
-  Re-run whenever a frontend task surfaces a pattern, anti-pattern, gotcha,
-  or sharper rule that would help future agents. Auto-invoke when the user
-  says "update the skill", "capture this", "train the skill", "save this
-  lesson", "add to frontend rules", or whenever YOU (the agent) notice
-  during frontend work a rule worth promoting from one-off tactic to
-  documented taste. Distinguishes universal-worthy lessons (→ canonical
-  `frontend.md`) from project-specific facts (→ project overlay
-  `frontend-project.md`) from session noise (→ neither). Syncs canonical to
-  installed copies.
+description: 'Use when the user says "train the frontend skill", "save this UI lesson", "add to frontend rules", or you find a frontend rule worth keeping. Not for project-only facts (use lore).'
 ---
 
 # ubgo-frontend-train
@@ -45,8 +33,8 @@ The body (`TRAIN.md`) makes this operational: where to write, what to write, wha
 ## What this skill does NOT cover
 
 - **Project-specific learnings** — those go to `frontend-project.md` (the overlay), not the canonical `frontend.md`. If the lesson contains a file path, repo name, customer name, tenant ID, channel code, or named constant specific to one codebase → overlay, not canonical.
-- **Generating a fresh overlay from a repo** — that's `ubgo-frontend-learn` / `ubgo-frontend-train-project` (sibling skill, if it exists; otherwise do the overlay manually per `ubgo-golang-learn`'s pattern).
-- **Backend learnings** — `ubgo-golang-learn` for project overlays, edit `ubgo-golang/golang.md` directly for universal Go rules (or write a `ubgo-golang-train` sibling using this skill's shape).
+- **Generating a fresh overlay from a repo** — that's `ubgo-frontend-learn` / `ubgo-frontend-train-project` (sibling skill, if it exists; otherwise do the overlay manually per the pattern in `ubgo-golang-train/LEARN.md`).
+- **Backend learnings** — the learn mode of `ubgo-golang-train` for project overlays, edit `ubgo-golang/golang.md` directly for universal Go rules (or write a `ubgo-golang-train` sibling using this skill's shape).
 - **Captures into project knowledge stores** (`lore memory add`, `aicoder taste_pref add`, etc.) — separate skill flow.
 
 ## Output
