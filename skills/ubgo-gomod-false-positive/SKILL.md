@@ -1,15 +1,6 @@
 ---
 name: ubgo-gomod-false-positive
-description: >-
-  Diagnose + fix the gopls false-positive "X is not in your go.mod file"
-  (and "malformed module path: missing dot", "go.work requires go >= X
-  (running go Y)") in a Go go.work multi-module workspace, when go build /
-  go list pass fine. Covers the five real root causes behind the phantom
-  errors — toolchain skew (the sneaky one), missing replace directives,
-  dependency version skew, root vendor/, and go-directive mismatch — with a
-  deterministic gopls check reproduction and a copy-paste triage. Use when
-  the editor (gopls/VS Code Go) red-squiggles imports that ARE in go.mod,
-  often on the wrong file, including for obvious local modules.
+description: 'Use when gopls says "X is not in your go.mod file", "malformed module path", or "go.work requires go >=" while go build passes.'
 ---
 
 # ubgo-gomod-false-positive

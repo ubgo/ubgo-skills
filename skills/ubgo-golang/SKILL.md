@@ -1,16 +1,11 @@
 ---
 name: ubgo-golang
-description: >-
-  Universal Go backend rules — stack choices, the 3 commandments (no bare
-  strings, no hardcoded enums, no DB-level business validation), entpoly for
-  polymorphism, reference tables, DB-as-dumb-storage, logging/tracing,
-  secrets, anti-patterns. Read BEFORE any change to Go code. Project-specific
-  overrides live in a sibling overlay (see "Overlay" below).
+description: Use before any Go code change, ent schema, gqlgen resolver or migration. Covers the ubgo stack (ubgo/logger, otelkit, errx and the other github.com/ubgo/* libraries). Not for gopls go.mod errors (use ubgo-gomod-false-positive).
 ---
 
 # ubgo-golang
 
-Universal Go backend taste. Project-agnostic — applies to every Go repo I ship.
+Universal Go backend taste for the ubgo stack. Project-agnostic — applies to every Go repo shipping the `github.com/ubgo/*` libraries: **logging** is `github.com/ubgo/logger` (via a project `applog` wrapper, `ulog` fields), **tracing** is `github.com/ubgo/otelkit` (spans via standard `otel.Tracer`), **errors** are `github.com/ubgo/errx` — the retired `lace/gozap`, `lace/gotel`, and `goerr` never appear.
 
 ## How to load
 
@@ -23,11 +18,11 @@ Universal Go backend taste. Project-agnostic — applies to every Go repo I ship
    - `.codex/rules/golang-project.md`
    - `golang-project.md` at repo root
    - A `## Project Go rules` section inside `AGENTS.md`, `GEMINI.md`, or `.github/copilot-instructions.md`
-3. If no overlay exists and the repo is non-trivial Go, suggest the user run the `ubgo-golang-learn` skill to generate one.
+3. If no overlay exists and the repo is non-trivial Go, suggest the learn mode of the `ubgo-golang-train` skill (`LEARN.md`) to generate one.
 
 ## Rules body
 
-See [`golang.md`](./golang.md) in this skill directory. It is the authoritative rules document — sections cover the 3 commandments, stack, named constants, polymorphism via entpoly, reference tables, validation, logging, tracing, secrets, anti-patterns, and pre-PR checklist.
+See [`golang.md`](./golang.md) in this skill directory. It is the authoritative rules document — sections cover the 3 commandments, the v2 `github.com/ubgo/*` stack, named constants, polymorphism via `ubgo/entx` entpoly, reference tables, DB-as-dumb-storage, validation, logging (`applog`/`ubgo/logger`), tracing (`ubgo/otelkit`), errors (`ubgo/errx`), concurrency, multi-tenant safety, anti-patterns, and the pre-PR checklist.
 
 ## When this skill fires
 
@@ -38,4 +33,4 @@ See [`golang.md`](./golang.md) in this skill directory. It is the authoritative 
 ## What this skill does NOT cover
 
 - Frontend / TypeScript — different skill.
-- Project-specific constants, paths, codegen task names, DB names, git identity — those belong in the overlay. Generate via `ubgo-golang-learn`.
+- Project-specific constants, paths, codegen task names, DB names, git identity — those belong in the overlay. Generate via the learn mode of `ubgo-golang-train`.

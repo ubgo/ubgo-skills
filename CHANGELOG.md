@@ -2,6 +2,16 @@
 
 Notable changes to skills in this repo. Format: reverse-chronological, grouped by skill, terse bullet per change. No semver pinning yet — this is a running log of what shifted and why, so consumers diffing across `npx skills update` can see what's new.
 
+## 2026-11-08
+
+### `ubgo-golang` (merged)
+
+- The v2 skill is now `ubgo-golang` (the ubgo/logger, otelkit, errx stack). The old v1 skill (lace/gozap, lace/gotel, goerr) moved to `archive/ubgo-golang-v1`; no repo uses that stack any more. Its one stack-independent section, "Top-to-bottom file layout — no magic", was folded into `golang.md`.
+
+### `ubgo-golang-train` (absorbs `ubgo-golang-learn`)
+
+- `ubgo-golang-learn` is now the learn mode of `ubgo-golang-train` (`LEARN.md`); the old skill folder is kept in `archive/ubgo-golang-learn`. One skill, two modes: universal lessons to `golang.md`, repo facts to the `golang-project.md` overlay.
+
 ## 2026-06-23
 
 ### `ubgo-gomod-false-positive` (NEW)

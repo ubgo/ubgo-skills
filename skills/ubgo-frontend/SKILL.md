@@ -1,14 +1,6 @@
 ---
 name: ubgo-frontend
-description: >-
-  Universal frontend rules — stack (TanStack ecosystem + Base UI + Tailwind v4
-  + gqlkit), the 5 commandments (no inline GraphQL, no useEffect-for-fetch,
-  no native dialogs/selects, no Radix), design tokens (Fraunces + Geist +
-  compact type scale), forms, data fetching, routing, dialogs, SSR safety,
-  drawer/sheet widths, keyboard dispatcher, hard-won traps. Read BEFORE any
-  change to TypeScript / React / `.tsx` / styling code in this project's
-  frontend repo. Project-specific overrides live in a sibling overlay (see
-  "Overlay" below).
+description: 'Use before editing TypeScript, React, .tsx or styles in a ubgo-stack app (TanStack, Base UI, Tailwind v4, gqlkit). Not for shadcn projects (use shadcn) or a new page design (use hallmark).'
 ---
 
 # ubgo-frontend

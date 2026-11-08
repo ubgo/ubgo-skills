@@ -18,36 +18,41 @@ If you find yourself violating one of those three, stop and ask before continuin
 
 ## 1 · Stack (consistent across every Go project we ship)
 
-We use the same libraries everywhere. If you're tempted to introduce an alternative, the answer is almost always no — extend the wrapper, don't bypass it.
+We use the same libraries everywhere. If you're tempted to introduce an alternative, the answer is almost always no. In **v2** the shared concerns live in published **`github.com/ubgo/*`** libraries (each a zero-/low-dep core with isolated `contrib/` adapters); the HTTP/DB/CLI/gqlgen layer is still wrapped under `lace/*`. There is **no `lace/gozap`, no `lace/gotel`, no `goerr`** — those were replaced by `ubgo/logger`, `ubgo/otelkit`, and `ubgo/errx`.
 
 | Concern | Library | Notes |
 |---|---|---|
-| HTTP server | `gin` (wrapped via `lace/ginserver`) | |
-| GraphQL | `gqlgen` | code-first, type-safe; resolvers hand-written and one-line-delegated |
-| ORM | `ent` + `entpoly` (polymorphic) | `entpoly` REQUIRED for any polymorphic-owner relation (§5) |
+| HTTP server | `gin` (wrapped via `lace/ginserver`) | otelgin instrumentation |
+| GraphQL | `gqlgen` (+ `entgo.io/contrib` entgql) | schema-first, type-safe; resolvers thin, one-line-delegated |
+| ORM | `ent` | `entpoly` via `github.com/ubgo/entx` for polymorphic-owner relations (§3) |
 | CLI | `cobra` (wrapped via `lace/cli`) | |
 | Config | PKL (Apple) | type-safe, codegen; secrets via `read("env:VAR")` |
-| Validation | `valgo` (`github.com/cohesivestack/valgo`) | for business rules; ent's `.NotEmpty()` / `.MaxLen()` handle structural |
-| Logging | `lace/gozap` | wraps zap with OTEL hooks; `gozap.FromCtx(ctx)` propagates trace IDs |
-| Tracing | `lace/gotel` | OTEL setup; `telem.TraceStart(ctx, "name")` helper |
+| Validation | `valgo` (`github.com/cohesivestack/valgo`) | business rules; ent's `.NotEmpty()` / `.MaxLen()` handle structural |
+| **Logging** | **`github.com/ubgo/logger`** (aliased `ulog`), typically via a project `applog` wrapper | slog-native, zero-alloc, OTEL sink; `applog.FromCtx(ctx)` propagates trace IDs. NOT `lace/gozap`/`zap`. |
+| **Tracing** | **`github.com/ubgo/otelkit`** | one-constructor OTEL bootstrap (traces/metrics/logs) + vendor presets; spans via standard `otel.Tracer(...)`. NOT `lace/gotel`. |
+| **Errors** | stdlib `errors` + `fmt.Errorf("...: %w")`, structured via **`github.com/ubgo/errx`** | stable identity, redactable fields, wire codec. NOT `goerr`. |
 | Postgres driver | `pgx/v5` (wrapped via `lace/db`) | |
-| Cache | `lace/cache` + `lace/cacheredis` | interface + Redis impl |
-| Messaging | `lace/natso` | NATS JetStream wrapper |
-| Scheduler | `gocron/v2` (transitioning to **Hatchet**) | new work targets Hatchet |
-| HTTP client | `lace/httpreq` | timeouts + retries handled |
-| IDs | `lace/publicid` | prefixed IDs (`prd_`, `prj_`, …); never roll your own |
-| Encryption | `lace/crypt` | AES; CLI for encrypt/decrypt |
-| Errors | stdlib `errors` + `fmt.Errorf("...: %w")` | optional `goerr` wrapper for richer types |
+| Cache | `github.com/ubgo/cache` + adapters (`cache-redis`, `cache-mem`, `cache-pg`, tiered/cluster) | one interface, swappable backends, single-flight `Remember` |
+| Locks | `github.com/ubgo/lock` | one interface, 5 backends (filelock/flock/Redis/Postgres/etcd), fencing tokens |
+| Messaging | NATS JetStream (+ `github.com/ThreeDotsLabs/watermill`) | register handlers in the app's after-NATS callback |
+| Scheduler | `gocron/v2` | |
+| Health | `github.com/ubgo/health` (+ gin/redis contribs) | k8s-style probes; powers `/api/i/bootinfo` |
+| Shutdown | `github.com/ubgo/shutdown` | phased, observable graceful shutdown |
+| Build metadata | `github.com/ubgo/buildinfo` | version/commit/modules; OTEL/slog adapters |
+| HTTP client | `github.com/ubgo/httpreq` | timeouts + retries handled |
+| IDs | `github.com/ubgo/publicid` (or an ent `BaseMixin{Prefix}` nanoid) | prefixed IDs (`prd_`, `prj_`, …); never roll your own |
+| Encryption | `github.com/ubgo/crypt` | AES; CLI for encrypt/decrypt |
 
-**`lace/` wrappers MUST be used over the underlying library directly.** That's where project conventions (logger injection, telemetry, prefix policy, retry, sentry hooks) are wired. Need something the wrapper doesn't expose? Extend the wrapper; don't bypass it. Direct use of `nats.go` / `go-redis` / raw `pgx` is an automatic NACK in review.
+**Use the `ubgo/*` library (or its `lace/*` wrapper) over the raw upstream package.** That's where project conventions (logger injection, telemetry, prefix policy, retry, sentry hooks) are wired. Need something it doesn't expose? Extend it or add a `contrib/` adapter; don't bypass it. Direct use of `nats.go` / `go-redis` / raw `pgx` / raw `zap` is an automatic NACK in review.
 
 **Do not use:**
 
 - `encoding/json` raw for validation — use `valgo`
 - `database/sql` directly — use `ent`
-- stdlib `log` — use `lace/gozap`
+- stdlib `log` / `fmt.Println` for app output — use `github.com/ubgo/logger` (via `applog`)
+- `lace/gozap`, `lace/gotel`, `goerr` — retired; use `ubgo/logger`, `ubgo/otelkit`, `ubgo/errx`
 - `net/http` server directly — use `gin` (via `lace/ginserver`)
-- Custom cron scheduling — use `gocron/v2` (or Hatchet on new code)
+- Custom cron scheduling — use `gocron/v2`
 - `math/rand` for tokens / IDs / nonces — use `crypto/rand` (§24)
 
 ---
@@ -107,7 +112,7 @@ return SourceSystemShopify
 
 ## 3 · Polymorphic relations — entpoly, always
 
-Every polymorphic owner relation (a table with `owner_type` + `owner_id` discriminator pair) uses `github.com/ubgo/entx/entpoly`. Hand-rolled `owner_kind` enum columns are BANNED.
+Every polymorphic owner relation (a table with `owner_type` + `owner_id` discriminator pair) uses `github.com/ubgo/entx`. Hand-rolled `owner_kind` enum columns are BANNED.
 
 ```go
 // schema/<table>.go
@@ -423,32 +428,67 @@ One clear responsibility per package. When a single file grows past ~600 lines o
 
 ---
 
-## 10 · Logging — `lace/gozap`
+## 9 · Service / package design
 
-Always `lace/gozap` (wraps zap + OTEL hooks). Never stdlib `log`, `fmt.Println`, or `fmt.Printf` for application output.
+### Accept interfaces, return structs
+
+```go
+// Good
+func Process(r io.Reader) (*Result, error) {}
+```
+
+Caller can pass `*os.File`, `*bytes.Reader`, an in-memory mock — your tests stay clean.
+
+### Dependency injection, NOT package-level globals
+
+```go
+// Good — dep is injected, lifetime + replaceable in tests
+type Service struct { db *ent.Client }
+func New(db *ent.Client) *Service { return &Service{db: db} }
+
+// Bad — every method silently depends on initialization order
+var globalDB *ent.Client
+func DoThing(...) { globalDB.User.Query()... }
+```
+
+### Keep packages focused
+
+One clear responsibility per package. When a single file grows past ~600 lines or two unrelated concerns share state, split it.
+
+### Don't `panic` for operational errors
+
+`panic` only for init-time fatal failures (config missing, can't bind port). Operational errors return `error`.
+
+`log.Fatal` is banned — it kills graceful shutdown. Return an error to `main`, let it decide.
+
+---
+
+## 10 · Logging — `github.com/ubgo/logger` (via a project `applog` wrapper)
+
+Always `github.com/ubgo/logger` (via a project `applog` wrapper) — slog-native structured logging with an OTEL sink. Never stdlib `log`, `fmt.Println`, or `fmt.Printf` for application output.
 
 ```go
 import (
-    "lace/gozap"
-    "go.uber.org/zap"
+    "core/pkg/applog"              // project wrapper: bootstrap + FromCtx/GetLogger over ubgo/logger
+    ulog "github.com/ubgo/logger"  // field constructors: ulog.String, ulog.Err, ulog.Any, …
 )
 
 // With context (preferred — propagates trace_id, span_id):
-gozap.FromCtx(ctx).Info("operation done",
-    zap.String("user_id", userID),
-    zap.Int("count", count),
+applog.FromCtx(ctx).Info("operation done",
+    ulog.String("user_id", userID),
+    ulog.Any("count", count),
 )
 
 // Without context:
-gozap.GetLogger().Warn("rate limit approaching", zap.Int("current", n))
+applog.GetLogger().Warn("rate limit approaching", ulog.Any("current", n))
 ```
 
 **Rules:**
 
 - **Log at the boundary** (handler, resolver, job entry, cron entry). Services return errors; callers log.
-- **Structured fields**, never string interpolation. `zap.Error(err)` for errors, `zap.String/Int/Duration/Bool` for values.
+- **Structured fields**, never string interpolation. `ulog.Err(err)` for errors, `ulog.String` / `ulog.Any` / `ulog.Dur` / `ulog.Bool` for values (no `Int`/`Strings` constructors — use `ulog.Any`).
 - **Never log secrets** — password, token, API key, encrypted blob. Wrap sensitive ent fields with `field.String(...).Sensitive()` so the auto-logger skips them.
-- `gozap.FromCtx(ctx)` automatically adds `trace_id` + `span_id` from the OTEL span on `ctx`. Use it everywhere context is in scope.
+- `applog.FromCtx(ctx)` automatically adds `trace_id` + `span_id` from the OTEL span on `ctx`. Use it everywhere context is in scope.
 
 **Log levels:**
 
@@ -463,7 +503,7 @@ gozap.GetLogger().Warn("rate limit approaching", zap.Int("current", n))
 
 ---
 
-## 11 · Tracing — OTEL via `lace/gotel`
+## 11 · Tracing — OTEL via `github.com/ubgo/otelkit`
 
 Add a span at every meaningful operation boundary:
 
@@ -472,13 +512,11 @@ import (
     "go.opentelemetry.io/otel"
     "go.opentelemetry.io/otel/attribute"
     "go.opentelemetry.io/otel/codes"
-
-    "lace/gotel"
 )
 
-// Helper form (preferred for service code):
-telem := gotel.MustGetTelemetry()
-ctx, span := telem.TraceStart(ctx, "order.process")
+// Telemetry is bootstrapped once at startup with otelkit (otelkit.Init +
+// tel.SetGlobal); spans use the STANDARD OTel API — no TraceStart helper:
+ctx, span := otel.Tracer("order").Start(ctx, "order.process")
 defer span.End()
 
 span.SetAttributes(
@@ -501,7 +539,7 @@ Auto-traced for free: DB queries (ent operations with `ctx`), HTTP handlers (gin
 **CLI commands** that produce traces — give OTEL time to flush before exit:
 
 ```go
-defer gotel.MustGetTelemetry().Shutdown(ctx) // or time.Sleep(2 * time.Second) as a fallback
+defer tel.Shutdown(ctx) // tel = the otelkit telemetry from bootstrap; or time.Sleep(2*time.Second) fallback
 ```
 
 ---
@@ -544,7 +582,7 @@ field.String("password").Sensitive()      // hidden from logs/debug
 field.String("api_token").Sensitive()
 ```
 
-The `Sensitive()` marker strips the field from auto-logging (`gozap` honors it via ent's marshaler).
+The `Sensitive()` marker strips the field from auto-logging (`ubgo/logger` honors it via ent's marshaler).
 
 ### Column / field naming — no bare nouns
 
@@ -923,7 +961,7 @@ defer io.Copy(io.Discard, resp.Body)
 
 **Status codes are not errors** — `client.Do` returns `nil` error for 4xx/5xx. Check `resp.StatusCode` explicitly.
 
-`lace/httpreq` wraps these defaults — prefer it over rolling your own `http.Client` (§1).
+`github.com/ubgo/httpreq` wraps these defaults — prefer it over rolling your own `http.Client` (§1).
 
 ---
 
@@ -969,14 +1007,14 @@ Exported accessors live with the key in the same package. Callers NEVER `ctx.Val
 ```go
 type Service struct {
     db      *ent.Client
-    logger  *zap.Logger
+    logger  *ulog.Logger
     timeout time.Duration
     retries int
 }
 
 type Option func(*Service)
 
-func WithLogger(l *zap.Logger) Option    { return func(s *Service) { s.logger = l } }
+func WithLogger(l *ulog.Logger) Option    { return func(s *Service) { s.logger = l } }
 func WithTimeout(d time.Duration) Option { return func(s *Service) { s.timeout = d } }
 func WithRetries(n int) Option           { return func(s *Service) { s.retries = n } }
 
@@ -1083,7 +1121,7 @@ Embed sparingly. Deep embedding chains make the method set unpredictable and obs
 // OK — composition with a clear named field
 type Service struct {
     db  *ent.Client
-    log *zap.Logger
+    log *ulog.Logger
 }
 
 // Smell — embed something with a wide method set; consumers can't tell
@@ -1135,7 +1173,7 @@ The rest of this section is the operational support for the rule.
 - **Reach into Go via `os.Getenv` (raw) or the project's config layer** (PKL `read("env:VAR_NAME")` in this stack). Never via a string literal inside the source file.
 - **Docs + examples use placeholders.** When showing usage in a README / CLAUDE.md / package doc, the placeholder is the literal text `shpat_xxx` or `<TOKEN>` — never a real one, never a "scrambled" one (scramblers fail; the original key shape is recoverable).
 - **`field.String("password").Sensitive()`** on every ent field holding a secret — strips from logs / debug / `String()` output.
-- **`lace/crypt`** (AES) for anything encrypted at rest in the DB. CLI for one-off encrypt/decrypt: `go run ./saas/cmd/cli crypt -e "value"` / `-d "encrypted"`.
+- **`github.com/ubgo/crypt`** (AES) for anything encrypted at rest in the DB. CLI for one-off encrypt/decrypt: `go run ./saas/cmd/cli crypt -e "value"` / `-d "encrypted"`.
 - **`subtle.ConstantTimeCompare`** for API-key comparisons — timing-attack-safe.
 - **Gitignored at the start of every project:** `.env*`, `_keys/`, `*.pem`, `*.key`, `*.creds`, `.github/.secrets*`. Verify with `git check-ignore` before adding any sensitive-looking file.
 
@@ -1375,7 +1413,7 @@ Any hit is a cross-tenant vulnerability — replace with the `WorkspaceFromConte
 | Hand-rolled `owner_kind` + `owner_id` columns | Drifts from real ent types; convention only | entpoly `MorphMixin + MorphTo` (§3) |
 | Triggers / CHECK functions / hardening SQL beyond ORM-emitted | Couples DB to behavior; locks out sharding | App-layer validation (§5) |
 | Direct use of `nats.go` / `go-redis` / `pgx` when `lace/` wraps it | Bypasses project conventions (logger, telemetry, retry) | Use the `lace/` wrapper (§1) |
-| stdlib `log` / `fmt.Println` for app output | No level, no fields, no trace | `lace/gozap` (§10) |
+| stdlib `log` / `fmt.Println` for app output | No level, no fields, no trace | `github.com/ubgo/logger` (via a project `applog` wrapper) (§10) |
 | `panic(err)` in service code | Crashes process; no graceful shutdown | Return `error`, caller decides (§9) |
 | `log.Fatal(err)` anywhere except `main` startup | Same as panic; bypasses defers | Return error to `main` |
 | Package-level globals | Untestable; hidden coupling | Inject via constructor (§9) |
@@ -1430,7 +1468,7 @@ Before saying a Go change is "done":
 - [ ] §7 — every blocking call accepts + uses `context.Context`
 - [ ] §8 — naming follows package + struct conventions
 - [ ] §9 — services inject deps via constructor; no new globals
-- [ ] §10 + §11 — `lace/gozap` logging at boundaries; `lace/gotel` tracing where it matters
+- [ ] §10 + §11 — `github.com/ubgo/logger` (via a project `applog` wrapper) logging at boundaries; `github.com/ubgo/otelkit` tracing where it matters
 - [ ] §12 — ORM queries use generated field constants, not strings; sensitive fields marked; every new column has a role-suffix (`_status`, `_at`, `_id`, `_kind`) or domain-prefix — NO bare nouns (`payment`, `lifecycle`, `note`, `kind`)
 - [ ] §13 — business validation via `valgo` at service entry
 - [ ] §15 — new logic has table-driven tests covering happy + error paths
@@ -1471,7 +1509,7 @@ One repo, multiple modules glued via `go.work`. Typical shape:
 ├── dbent/                # ent schema + entgql + Atlas migrations
 ├── core/                 # domain primitives (no app glue)
 ├── config/               # pkl config + generated Go bindings
-├── lace/                 # shared infra wrappers (pgx, NATS, sentry, otel, gozap)
+├── lace/                 # lace/*: HTTP/DB/CLI/gqlgen wrappers (ginserver, db, cli, gqlgen). Observability/errors/cache = github.com/ubgo/*
 ├── saas/
 │   ├── cmd/api/          # server entrypoint (Gin + gqlgen)
 │   ├── cmd/cli/          # operator CLI
@@ -1484,7 +1522,7 @@ One repo, multiple modules glued via `go.work`. Typical shape:
 Rules:
 - New domain → new module under the repo (not a subpackage of an existing module). Modules are the unit of dependency boundary.
 - `cmd/<binary>` lives inside the `saas` (or equivalent) module that owns the deployable; never as a top-level dir.
-- `lace/*` is the dumping ground for thin wrappers over external libs (gozap over zap, gotel over otel, etc.) — keeps the rest of the codebase importing one project-owned wrapper instead of N versions of the upstream API.
+- Shared concerns are published **`github.com/ubgo/*`** libraries (logger, otelkit, errx, cache, lock, health, shutdown, buildinfo, crypt, publicid, entx, httpreq) — reusable across every repo, versioned, with zero-dep cores. The remaining `lace/*` wraps the HTTP/DB/CLI/gqlgen layer (ginserver, db, cli, gqlgen helpers). Either way the codebase imports one project-owned entry point, never N versions of the raw upstream API.
 
 ### 33.2 · Taskfile is the only runner
 

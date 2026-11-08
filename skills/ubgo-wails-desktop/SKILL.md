@@ -1,27 +1,6 @@
 ---
 name: ubgo-wails-desktop
-description: >-
-  Package an existing Go (Gin + gqlgen + oRPC + tRPC) backend and a Web SPA
-  frontend (TanStack Start / Vite / Next-static / SvelteKit-static) into a
-  single native macOS desktop binary using Wails — with ZERO TCP listeners at
-  runtime. Every API call from the frontend rides the Wails IPC bridge
-  (`window.go.main.App.HTTP`) into the existing Gin engine in-memory via
-  `httptest.NewRecorder`. No code rewrites in the backend (Gin routes,
-  gqlgen schema, ent, middleware, plugins all stay). No code rewrites in the
-  frontend (oRPC / tRPC / Apollo / urql / raw fetch all stay) — only a
-  `fetch`-shaped transport swap via a `bridgeFetch` shim. Read this skill
-  end-to-end BEFORE starting; it captures every gotcha empirically encountered
-  during a real integration: Wails CLI vs Go workspace incompat, macOS
-  framework linker flags (`-framework UniformTypeIdentifiers`), TanStack
-  Start `_shell.html` rename, `config.Get` CWD trap, debug+devtools build
-  tags for WKWebView Inspector, why the Network tab stays empty (postMessage
-  bridge, not HTTP), streaming-response buffering, cookie/session domain
-  scoping, vendor regeneration, Wails v2.8.1's smaller mac.Options surface.
-  Includes empirical benchmarks (binary ~100MB, RSS ~155MB, 33% base64 IPC
-  overhead, 9MB Wails-only overhead over the existing API binary). The user
-  can be asked about backend repo path, frontend repo path, app name,
-  framework choice, and any deviations; sensible defaults are provided for
-  every unknown.
+description: 'Use when the user wants a Go backend + web frontend packaged as a macOS desktop app, or says "Wails", "desktop binary", "no TCP listener".'
 ---
 
 # ubgo-wails-desktop

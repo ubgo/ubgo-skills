@@ -57,7 +57,7 @@ When the issue is approved:
 1. Create `skills/ubgo-<topic>/` with `SKILL.md` (YAML frontmatter: `name`, `description`) + a body file (`<topic>.md`).
 2. Update the README skills table — keep the description tight; the body is the long form.
 3. If the topic should also be trainable (new rules get captured back during real use), add `ubgo-<topic>-train` with a `SKILL.md` + `TRAIN.md`. Use `ubgo-golang-train` as the canonical template.
-4. If projects need overlays for this topic, add `ubgo-<topic>-learn` with a `SKILL.md` describing the bootstrap recipe + multi-agent target paths. Use `ubgo-golang-learn` as the canonical template.
+4. If projects need overlays for this topic, add a `LEARN.md` to the topic's train skill describing the bootstrap recipe + multi-agent target paths. Use `ubgo-golang-train/LEARN.md` as the canonical template.
 
 ### 4. Promote a project-specific lesson to universal
 
