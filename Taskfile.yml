@@ -214,6 +214,7 @@ tasks:
   validate:
     desc: 'Check every SKILL.md has required YAML frontmatter (name, description)'
     cmds:
+      - task: names:check
       - |
         fail=0
         for skill_md in "{{.SKILLS_DIR}}"/*/SKILL.md; do
@@ -236,3 +237,8 @@ tasks:
           fi
         done
         exit $fail
+
+  names:check:
+    desc: Fail if a tracked file holds a private name listed (as a sha256 hash) in .github/denyhash.txt
+    cmds:
+      - bash scripts/check-names.sh
